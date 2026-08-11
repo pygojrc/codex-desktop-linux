@@ -16,6 +16,8 @@ concurrency:
 env:
   UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg
   UPSTREAM_DMG_PATH: /tmp/codex-release/Codex.dmg
+  # 发布包只由 pacman 手动更新，不包含本地更新器或用户级 systemd 服务。
+  PACKAGE_WITH_UPDATER: "0"
 
 jobs:
   build-and-release:
@@ -80,10 +82,12 @@ jobs:
       - name: 在 Arch Linux 中构建并检查软件包
         env:
           PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          PACKAGE_WITH_UPDATER: ${{ env.PACKAGE_WITH_UPDATER }}
         run: |
           set -euo pipefail
           docker run --rm \
             -e PACKAGE_VERSION \
+            -e PACKAGE_WITH_UPDATER \
             -e RUNNER_UID="$(id -u)" \
             -e RUNNER_GID="$(id -g)" \
             -v "$GITHUB_WORKSPACE:/work" \
@@ -125,10 +129,11 @@ jobs:
           {
             echo "由 GitHub Actions 从上游 ChatGPT Desktop ${APP_VERSION} 构建。"
             echo
-            echo "适用于 Arch Linux x86_64，可直接使用 pacman 安装："
+            echo "适用于 Arch Linux x86_64。请先下载软件包，再使用 pacman 安装："
             echo
             echo '```bash'
-            echo "sudo pacman -U \"${install_url}\""
+            echo "wget -O \"${PACKAGE_NAME}\" \"${install_url}\""
+            echo "sudo pacman -U \"./${PACKAGE_NAME}\""
             echo '```'
             echo
             echo "同时发布 SHA-256 校验文件。"
@@ -161,5 +166,6 @@ jobs:
             echo
             echo "- Release：[$RELEASE_TAG](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG})"
             echo "- 软件包：\`$PACKAGE_NAME\`"
-            echo "- 安装：\`sudo pacman -U '$install_url'\`"
+            echo "- 下载：\`wget -O '$PACKAGE_NAME' '$install_url'\`"
+            echo "- 安装：\`sudo pacman -U './$PACKAGE_NAME'\`"
           } >> "$GITHUB_STEP_SUMMARY"

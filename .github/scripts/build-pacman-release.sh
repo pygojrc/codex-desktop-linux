@@ -16,20 +16,23 @@ useradd --create-home --uid "$RUNNER_UID" --gid "$group_name" builder
 runuser -u builder -- env \
     HOME=/home/builder \
     PACKAGE_VERSION="$PACKAGE_VERSION" \
-    bash -c 'cd /work && cargo build --release -p codex-update-manager && ./scripts/build-pacman.sh'
+    PACKAGE_WITH_UPDATER="${PACKAGE_WITH_UPDATER:-0}" \
+    bash -c 'cd /work && ./scripts/build-pacman.sh'
 
 package_file="$(find dist -maxdepth 1 -type f -name 'codex-desktop-*.pkg.tar.zst' -print -quit)"
 test -n "$package_file"
 test -f "$package_file"
 
-# 校验 pacman 元数据以及发布包必须包含的关键文件。
+# 校验 pacman 元数据、启动器和发布包不含本地更新器。
 pacman -Qip "$package_file"
 pacman -Qlp "$package_file" | tee /tmp/pacman-release-contents.txt >/dev/null
 tar -xOf "$package_file" .PKGINFO | tee /tmp/pacman-release-pkginfo.txt >/dev/null
 grep -q '^pkgname = codex-desktop$' /tmp/pacman-release-pkginfo.txt
 grep -q '^arch = x86_64$' /tmp/pacman-release-pkginfo.txt
 grep -q 'opt/codex-desktop/start.sh' /tmp/pacman-release-contents.txt
-grep -q 'usr/bin/codex-update-manager' /tmp/pacman-release-contents.txt
-grep -q 'usr/lib/systemd/user/codex-update-manager.service' /tmp/pacman-release-contents.txt
+if grep -qE '(^|/)codex-update-manager(\.service)?$' /tmp/pacman-release-contents.txt; then
+    echo "发布包不得包含 codex-update-manager 或其 systemd 服务" >&2
+    exit 1
+fi
 
 printf '%s\n' "$package_file" > /work/.pacman-release-package
