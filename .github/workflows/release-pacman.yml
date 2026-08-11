@@ -1,0 +1,165 @@
+name: 发布 Arch 软件包
+
+on:
+  push:
+    branches:
+      - codex/aur-release
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-pacman-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg
+  UPSTREAM_DMG_PATH: /tmp/codex-release/Codex.dmg
+
+jobs:
+  build-and-release:
+    name: 构建并发布 pacman 软件包
+    if: github.repository == 'pygojrc/codex-desktop-linux'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: 安装应用构建依赖
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full make g++ python3 curl unzip
+
+      - name: 下载上游 DMG
+        run: |
+          set -euo pipefail
+          scripts/ci/download-upstream-dmg.sh \
+            "$UPSTREAM_DMG_URL" \
+            "$UPSTREAM_DMG_PATH"
+
+      - name: 构建 Linux 应用
+        env:
+          CODEX_ACCEPTANCE_SOURCE: github-actions-release
+          REBUILD_REPORT_DIR: ${{ github.workspace }}/upstream-acceptance
+        run: make build-app DMG="$UPSTREAM_DMG_PATH"
+
+      - name: 生成发布版本
+        id: release
+        run: |
+          set -euo pipefail
+          app_version="$(node -e '
+            const info = require("./codex-app/.codex-linux/build-info.json");
+            const version = info?.upstreamDmg?.appVersion;
+            if (typeof version !== "string" || version.length === 0) process.exit(1);
+            process.stdout.write(version);
+          ')"
+          if [[ ! "$app_version" =~ ^[0-9][0-9A-Za-z._+]*$ ]]; then
+            echo "不支持的上游应用版本：$app_version" >&2
+            exit 1
+          fi
+
+          short_sha="${GITHUB_SHA:0:12}"
+          package_version="${app_version}+${short_sha}"
+          release_tag="arch-${app_version}-${short_sha}"
+
+          {
+            echo "app_version=$app_version"
+            echo "package_version=$package_version"
+            echo "release_tag=$release_tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 在 Arch Linux 中构建并检查软件包
+        env:
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e PACKAGE_VERSION \
+            -e RUNNER_UID="$(id -u)" \
+            -e RUNNER_GID="$(id -g)" \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            archlinux:base-devel \
+            bash .github/scripts/build-pacman-release.sh
+
+      - name: 生成软件包校验和
+        id: package
+        run: |
+          set -euo pipefail
+          package_file="$(cat .pacman-release-package)"
+          test -f "$package_file"
+
+          checksum_file="${package_file}.sha256"
+          (
+            cd "$(dirname "$package_file")"
+            sha256sum "$(basename "$package_file")"
+          ) > "$checksum_file"
+
+          {
+            echo "file=$package_file"
+            echo "name=$(basename "$package_file")"
+            echo "checksum_file=$checksum_file"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 发布到 GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+          APP_VERSION: ${{ steps.release.outputs.app_version }}
+          PACKAGE_FILE: ${{ steps.package.outputs.file }}
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          CHECKSUM_FILE: ${{ steps.package.outputs.checksum_file }}
+        run: |
+          set -euo pipefail
+
+          install_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${PACKAGE_NAME}"
+          {
+            echo "由 GitHub Actions 从上游 ChatGPT Desktop ${APP_VERSION} 构建。"
+            echo
+            echo "适用于 Arch Linux x86_64，可直接使用 pacman 安装："
+            echo
+            echo '```bash'
+            echo "sudo pacman -U \"${install_url}\""
+            echo '```'
+            echo
+            echo "同时发布 SHA-256 校验文件。"
+          } > release-notes.md
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "$PACKAGE_FILE" \
+              "$CHECKSUM_FILE" \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" \
+              --title "Arch 软件包 ${APP_VERSION}" \
+              --notes-file release-notes.md \
+              --latest \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" \
+              "$PACKAGE_FILE" \
+              "$CHECKSUM_FILE" \
+              --target "$GITHUB_SHA" \
+              --title "Arch 软件包 ${APP_VERSION}" \
+              --notes-file release-notes.md \
+              --latest \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
+          {
+            echo "## Arch 软件包发布"
+            echo
+            echo "- Release：[$RELEASE_TAG](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG})"
+            echo "- 软件包：\`$PACKAGE_NAME\`"
+            echo "- 安装：\`sudo pacman -U '$install_url'\`"
+          } >> "$GITHUB_STEP_SUMMARY"
