@@ -129,11 +129,21 @@ rm -rf \
 
 除非你还希望删除 Codex CLI 配置和项目状态，否则不要移除 `~/.codex`。
 
+## 连接已有 app-server
+
+启动器默认通过 stdio 使用本地 Codex CLI。若要改为通过 WebSocket 连接已经运行的 app-server，请显式设置其 URL：
+
+```bash
+CODEX_APP_SERVER_WS_URL=ws://127.0.0.1:18767 codex-desktop
+```
+
+此模式会跳过本地 CLI 的查找、安装、校验和预检。即使环境中继承了 `CODEX_APP_SERVER_WS_URL`，也可设置 `CODEX_APP_SERVER_FORCE_CLI=1` 强制使用默认 stdio 模式。仅应连接可信的本机回环 app-server；此启动参数不会额外提供认证或 capability token 处理。
+
 ## 安装前须知
 
 生成的应用和原生软件包内置受管理的 Linux Node.js 运行环境。对于普通安装、Browser Use、Codex CLI 的安装/更新或本地自动更新重建，不需要发行版提供的 `nodejs` / `npm` 软件包。
 
-运行时仍需要 Codex CLI。首次启动可使用内置的 `npm` 安装或更新 `@openai/codex`，你也可以自行管理 CLI。若通过 npm 手动安装 CLI，请使用 `npm i -g --include=optional @openai/codex` 包含可选依赖，从而安装 Linux 平台二进制文件。启动器不会按版本选择已安装的 CLI；它会先使用显式的 `CODEX_CLI_PATH`，再按常规查找顺序搜索，并记录解析出的 CLI 路径和尽力获取的版本，便于发现 GUI 的 PATH 问题。希望固定特定二进制文件时，请设置 `CODEX_CLI_PATH=/path/to/codex`。
+默认 stdio 模式在运行时仍需要 Codex CLI；按上文显式选择已有 app-server 时不需要本地 CLI。首次启动可使用内置的 `npm` 安装或更新 `@openai/codex`，你也可以自行管理 CLI。若通过 npm 手动安装 CLI，请使用 `npm i -g --include=optional @openai/codex` 包含可选依赖，从而安装 Linux 平台二进制文件。启动器不会按版本选择已安装的 CLI；它会先使用显式的 `CODEX_CLI_PATH`，再按常规查找顺序搜索，并记录解析出的 CLI 路径和尽力获取的版本，便于发现 GUI 的 PATH 问题。希望固定特定二进制文件时，请设置 `CODEX_CLI_PATH=/path/to/codex`。
 
 本地 AppImage 构建可选择性内嵌该 CLI 及对应的 Linux 平台软件包。运行 `make appimage` 时，将 `CODEX_CLI_BUNDLE_SOURCE` 设置为已安装的 `node_modules/@openai/codex` 目录；显式的 `CODEX_CLI_PATH` 在运行时仍然优先。请参阅[构建与打包](docs/build-and-packaging.md#appimage-local-self-build)。
 

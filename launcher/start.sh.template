@@ -104,6 +104,17 @@ CODEX_LINUX_FEATURES_DIR="$SCRIPT_DIR/.codex-linux/features"
 export CODEX_HOME CODEX_LINUX_APP_ID CODEX_LINUX_APP_DISPLAY_NAME CODEX_LINUX_WEBVIEW_PORT CODEX_LINUX_SETTINGS_FILE CODEX_LINUX_FEATURES_DIR
 APP_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/$CODEX_LINUX_APP_ID"
 
+# 显式 WS URL 连接已有 app-server；默认仍由本地 Codex CLI 提供 stdio transport。
+app_server_remote_enabled() {
+    [ "${CODEX_APP_SERVER_FORCE_CLI:-0}" != "1" ] &&
+        [ -n "${CODEX_APP_SERVER_WS_URL:-}" ]
+}
+
+if app_server_remote_enabled; then
+    # 远端模式不把本地 CLI 路径传给插件或子进程，避免隐式启动第二个 app-server。
+    unset CODEX_CLI_PATH CODEX_CLI_SOURCE_PATH
+fi
+
 configure_runtime_tmpdir() {
     [ -z "${TMPDIR:-}" ] || return 0
 
@@ -4600,7 +4611,7 @@ else
     log_phase "warm_start_ready"
 fi
 
-if [ -z "${CODEX_CLI_PATH:-}" ]; then
+if ! app_server_remote_enabled && [ -z "${CODEX_CLI_PATH:-}" ]; then
     CODEX_CLI_PATH="$(find_codex_cli || true)"
     export CODEX_CLI_PATH
     log_phase "cli_lookup"
@@ -4615,7 +4626,7 @@ else
     export ELECTRON_RENDERER_URL="$WEBVIEW_RENDERER_URL"
 fi
 
-if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then
+if needs_cold_start && ! app_server_remote_enabled && [ -z "$CODEX_CLI_PATH" ]; then
     if is_interactive_terminal; then
         if prompt_install_missing_cli; then
             if ! run_cli_preflight 1; then
@@ -4629,12 +4640,12 @@ if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then
     fi
 fi
 
-if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then
+if needs_cold_start && ! app_server_remote_enabled && [ -z "$CODEX_CLI_PATH" ]; then
     notify_error "Codex CLI is required but is not installed. Reopen the app to retry the automatic install flow, or install into a fresh safe prefix: (umask 0022; npm i -g --include=optional --prefix ~/.codex-cli-npm @openai/codex)"
     exit 1
 fi
 
-if [ -n "$CODEX_CLI_PATH" ]; then
+if ! app_server_remote_enabled && [ -n "$CODEX_CLI_PATH" ]; then
     if ! verify_cli_launch_path; then
         notify_error "The selected Codex CLI path does not resolve to an executable file. Reinstall the CLI or set CODEX_CLI_PATH to a working executable."
         exit 1
@@ -4642,7 +4653,7 @@ if [ -n "$CODEX_CLI_PATH" ]; then
     log_phase "cli_launch_path_verified"
 fi
 
-if needs_cold_start; then
+if needs_cold_start && ! app_server_remote_enabled; then
     cli_repair_required=0
     if codex_cli_missing_optional_dependency "$CODEX_CLI_PATH"; then
         cli_repair_required=1
@@ -4711,7 +4722,11 @@ fi
 resolve_browser_use_runtime_env
 log_phase "browser_use_runtime_env_resolved"
 
-log_codex_cli_path
+if app_server_remote_enabled; then
+    echo "Using remote app-server: $CODEX_APP_SERVER_WS_URL"
+else
+    log_codex_cli_path
+fi
 echo "Using managed Node.js runtime=${CODEX_MANAGED_NODE_RUNTIME_DIR:-$SCRIPT_DIR/resources/node-runtime}"
 
 launch_electron "${LAUNCHER_ARGS[@]}"

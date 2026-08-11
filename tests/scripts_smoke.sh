@@ -5806,9 +5806,17 @@ for marker in (
 ):
     if f'log_phase "{marker}"' not in source:
         raise SystemExit(f"launcher must log phase marker {marker}")
-if 'if [ -z "${CODEX_CLI_PATH:-}" ]; then' not in runtime_body:
-    raise SystemExit("launcher must run the cheap CLI lookup even for second-instance fallback")
-if 'if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then' not in runtime_body:
+if "app_server_remote_enabled() {" not in source:
+    raise SystemExit("launcher must expose an explicit remote app-server mode")
+if '[ "${CODEX_APP_SERVER_FORCE_CLI:-0}" != "1" ]' not in source or '[ -n "${CODEX_APP_SERVER_WS_URL:-}" ]' not in source:
+    raise SystemExit("remote app-server mode must require an explicit WS URL and allow forcing stdio")
+if "unset CODEX_CLI_PATH CODEX_CLI_SOURCE_PATH" not in source:
+    raise SystemExit("remote app-server mode must discard inherited local CLI paths")
+if re.search(r'CODEX_APP_SERVER_WS_URL="\$\{CODEX_APP_SERVER_WS_URL:-ws://', source):
+    raise SystemExit("launcher must not enable remote app-server mode by default")
+if 'if ! app_server_remote_enabled && [ -z "${CODEX_CLI_PATH:-}" ]; then' not in runtime_body:
+    raise SystemExit("launcher must run the cheap CLI lookup outside remote app-server mode")
+if 'if needs_cold_start && ! app_server_remote_enabled && [ -z "$CODEX_CLI_PATH" ]; then' not in runtime_body:
     raise SystemExit("second-instance handoff must skip missing-CLI failure")
 if '"$HOME/.bun/bin/codex"' not in source:
     raise SystemExit("CLI lookup must include bun global install path")
@@ -5823,8 +5831,8 @@ if source.count('{ exec 9>&-; } 2>/dev/null || true') < 2:
 for unexpected in ("find_codex_cli_entry", "codex_cli_version_compare", "codex_cli_version_gt", "sort -V"):
     if unexpected in source:
         raise SystemExit(f"launcher must not rank discovered CLI candidates with {unexpected}")
-if "if needs_cold_start;" not in runtime_body:
-    raise SystemExit("second-instance handoff must skip CLI preflight")
+if "if needs_cold_start && ! app_server_remote_enabled; then" not in runtime_body:
+    raise SystemExit("second-instance handoff and remote app-server mode must skip CLI preflight")
 if 'run_cold_start_hooks' not in runtime_body:
     raise SystemExit("cold start must run feature-staged hooks before Electron launches")
 for name, body in (("prelaunch", prelaunch_hooks_body), ("cold-start", cold_start_hooks_body), ("launcher", launcher_hooks_body)):
@@ -7128,17 +7136,22 @@ if preflight_match is None:
 trust_match = re.search(r"^verify_cli_launch_path\(\) \{[\s\S]*?^\}\n", source, re.M)
 if trust_match is None:
     raise SystemExit("missing verify_cli_launch_path")
-routing_start = source.index('if [ -n "$CODEX_CLI_PATH" ]; then\n    if ! verify_cli_launch_path')
+routing_start = source.index('if ! app_server_remote_enabled && [ -n "$CODEX_CLI_PATH" ]; then\n    if ! verify_cli_launch_path')
 routing_end = source.index("\nexport_packaged_runtime_env", routing_start)
-final_version_log = source.index("\nlog_codex_cli_path\n", routing_end)
-electron_launch = source.index("\nlaunch_electron ", final_version_log)
-if not routing_start < routing_end < final_version_log < electron_launch:
+final_log_start = source.index("\nif app_server_remote_enabled; then", routing_end) + 1
+final_log_end = source.index('\necho "Using managed Node.js runtime=', final_log_start)
+electron_launch = source.index("\nlaunch_electron ", final_log_end)
+if not routing_start < routing_end < final_log_start < final_log_end < electron_launch:
     raise SystemExit("CLI trust gate must precede the final version log and Electron launch")
 pathlib.Path(sys.argv[3]).write_text(
     "#!/usr/bin/env bash\n"
     "set -Eeuo pipefail\n\n"
     + r'''
 CODEX_CLI_PATH="${ROUTING_CLI_PATH:-/tmp/codex}"
+app_server_remote_enabled() {
+    [ "${CODEX_APP_SERVER_FORCE_CLI:-0}" != "1" ] &&
+        [ -n "${CODEX_APP_SERVER_WS_URL:-}" ]
+}
 has_update_manager() { [ "${UPDATE_MANAGER_AVAILABLE:-0}" = "1" ]; }
 run_cli_launch_path_helper() {
     printf 'trust=called\n' >> "$ROUTING_LOG"
@@ -7171,7 +7184,9 @@ launch_electron() { printf 'electron=launch\n' >> "$ROUTING_LOG"; }
     + trust_match.group(0)
     + "\n"
     + source[routing_start:routing_end]
-    + "\nlog_codex_cli_path\nlaunch_electron\n",
+    + "\n"
+    + source[final_log_start:final_log_end]
+    + "\nlaunch_electron\n",
     encoding="utf-8",
 )
 PY
@@ -7497,6 +7512,34 @@ PY
         fail "successful trust validation must allow Electron startup"
     [ "$(sed -n '/^trust=called$/=' "$routing_log")" -lt "$(sed -n '/^probe=missing-optional$/=' "$routing_log")" ] || \
         fail "trust validation must precede every CLI version probe"
+
+    : > "$routing_log"
+    local remote_output
+    remote_output="$(
+        env -i PATH="$HOST_TOOL_PATH" ROUTING_LOG="$routing_log" \
+            ROUTING_CLI_PATH="$workspace/missing-routing-codex" \
+            CODEX_APP_SERVER_WS_URL=ws://127.0.0.1:18767 \
+            UPDATE_MANAGER_AVAILABLE=0 TRUST_RESULT=failure BROKEN_CLI=1 \
+            "$routing_probe"
+    )"
+    [ "$remote_output" = "Using remote app-server: ws://127.0.0.1:18767" ] || \
+        fail "remote app-server mode must report the selected WS URL"
+    if grep -qE '^(trust=|probe=|preflight_args=|background=|version=|notify=)' "$routing_log"; then
+        fail "remote app-server mode must skip all local CLI handling"
+    fi
+    grep -qx 'electron=launch' "$routing_log" || \
+        fail "remote app-server mode must allow Electron startup without a local CLI"
+
+    : > "$routing_log"
+    env -i PATH="$HOST_TOOL_PATH" ROUTING_LOG="$routing_log" \
+        ROUTING_CLI_PATH="$routing_cli" \
+        CODEX_APP_SERVER_WS_URL=ws://127.0.0.1:18767 \
+        CODEX_APP_SERVER_FORCE_CLI=1 BROKEN_CLI=0 UPDATE_MANAGER_AVAILABLE=0 \
+        "$routing_probe" >/dev/null
+    grep -qx 'trust=called' "$routing_log" || \
+        fail "CODEX_APP_SERVER_FORCE_CLI=1 must preserve stdio CLI handling"
+    grep -qx 'version=final' "$routing_log" || \
+        fail "forced stdio mode must log the selected CLI"
 
     local trust_workspace="$workspace/standalone-trust"
     local codex_home="$trust_workspace/home/.codex"

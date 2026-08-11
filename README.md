@@ -156,15 +156,31 @@ rm -rf \
 Do not remove `~/.codex` unless you also want to delete your Codex CLI
 configuration and project state.
 
+## Connect to an Existing app-server
+
+The launcher uses the local Codex CLI over stdio by default. To connect to an
+already running app-server over WebSocket instead, set its URL explicitly:
+
+```bash
+CODEX_APP_SERVER_WS_URL=ws://127.0.0.1:18767 codex-desktop
+```
+
+In this mode the launcher skips local CLI discovery, installation, validation,
+and preflight. Set `CODEX_APP_SERVER_FORCE_CLI=1` to force the default stdio
+mode even when `CODEX_APP_SERVER_WS_URL` is inherited from the environment.
+Only connect to a trusted loopback app-server; this launcher option does not
+add authentication or capability-token handling.
+
 ## Before You Install
 
 The generated app and native packages bundle a managed Linux Node.js runtime.
 You do not need a distro `nodejs` / `npm` package for normal installs, Browser
 Use, Codex CLI install/update, or local auto-update rebuilds.
 
-The Codex CLI is still required at runtime. The first launch can install or
-update `@openai/codex` with the bundled `npm`, or you can manage the CLI
-yourself. If you install the CLI manually through npm, include optional
+The Codex CLI is required for the default stdio mode, but not when an existing
+app-server is selected explicitly as described above. The first launch can
+install or update `@openai/codex` with the bundled `npm`, or you can manage the
+CLI yourself. If you install the CLI manually through npm, include optional
 dependencies with `npm i -g --include=optional @openai/codex` so the Linux
 platform binary is present. The launcher does not rank installed CLIs by
 version; it uses an explicit `CODEX_CLI_PATH` first, then the normal lookup

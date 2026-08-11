@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- The launcher can connect to an existing app-server when
+  `CODEX_APP_SERVER_WS_URL` is set explicitly, while preserving local CLI stdio
+  as the default and allowing `CODEX_APP_SERVER_FORCE_CLI=1` to force it.
 - A disabled-by-default `deferred-update-build` Linux feature adds a **Build
   updates automatically** setting. Turning it off keeps notification and DMG
   verification active while deferring local package builds until an explicit
