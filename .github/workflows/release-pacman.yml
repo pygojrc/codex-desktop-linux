@@ -88,8 +88,11 @@ jobs:
               package_file="dist/codex-desktop-${package_version}-1-${PACMAN_ARCH}.pkg.tar.zst"
               test -f "$package_file"
               package_sha256="$(sha256sum "$package_file" | awk '\''{print $1}'\'')"
+              release_dir=dist/release
+              mkdir -p "$release_dir"
+              cp "$package_file" "$release_dir/"
               node -e '\''const fs = require("node:fs"); fs.writeFileSync(process.argv[1], `${JSON.stringify({ upstreamVersion: process.argv[2], architecture: process.argv[3], packageFile: process.argv[4], sha256: process.argv[5] }, null, 2)}\n`);'\'' \
-                "dist/release-metadata-${PACMAN_ARCH}.json" \
+                "$release_dir/release-metadata-${PACMAN_ARCH}.json" \
                 "$upstream_version" "$PACMAN_ARCH" "$(basename "$package_file")" "$package_sha256"
             '
       - name: Upload pacman release input
@@ -97,8 +100,7 @@ jobs:
         with:
           name: pacman-x86_64
           path: |
-            dist/codex-desktop-*.pkg.tar.zst
-            dist/release-metadata-x86_64.json
+            dist/release/
           if-no-files-found: error
           retention-days: 7
 

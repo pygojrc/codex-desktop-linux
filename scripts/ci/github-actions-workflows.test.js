@@ -132,6 +132,9 @@ test("Arch release builds only manual-update pacman packages from signed Linux p
   assert.match(workflow, /\.\/install\.sh/);
   assert.match(workflow, /\.\/scripts\/build-pacman\.sh/);
   assert.doesNotMatch(workflow, /PACMAN_STAGE_ONLY=1/);
+  assert.match(workflow, /release_dir=dist\/release/);
+  assert.match(workflow, /path: \|\n            dist\/release\//);
+  assert.doesNotMatch(workflow, /dist\/codex-desktop-\*\.pkg\.tar\.zst\n/);
   assert.match(workflow, /gh run download "\$GITHUB_RUN_ID"/);
   assert.match(workflow, /gh release create/);
   assert.match(workflow, /SHA256SUMS/);
