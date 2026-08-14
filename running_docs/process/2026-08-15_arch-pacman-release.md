@@ -4,3 +4,4 @@
 - 决定：新增独立 `release-pacman.yml`，固定 `PACKAGE_WITH_UPDATER=0`，不发布 deb、RPM 或 AppImage。
 - 构建边界：两个 GitHub runner 分别运行 x86_64 与 aarch64 Arch 容器；容器中先验证当前签名官方 Linux `.deb`，再以普通用户真实执行 `makepkg`。
 - 发布边界：仅在 `pygojrc/codex-desktop-linux` 的 main push 或手动触发时发布；Release 同时附带两个 `.pkg.tar.zst` 和 `SHA256SUMS`。
+- 修订：首轮 aarch64 runner 无法拉取固定 amd64 Arch 镜像；按用户要求收紧为仅发布 x86_64 包，并移除 aarch64 构建与发布路径。

@@ -122,11 +122,10 @@ test("Arch release builds only manual-update pacman packages from signed Linux p
   assert.match(workflow, /^  actions: read$/m);
   assert.match(workflow, /^  contents: write$/m);
   assert.match(workflow, /PACKAGE_WITH_UPDATER: "0"/);
-  assert.match(workflow, /upstream_arch: amd64/);
-  assert.match(workflow, /pacman_arch: x86_64/);
-  assert.match(workflow, /upstream_arch: arm64/);
-  assert.match(workflow, /pacman_arch: aarch64/);
-  assert.match(workflow, /ubuntu-24\.04-arm/);
+  assert.match(workflow, /PACMAN_ARCH: x86_64/);
+  assert.match(workflow, /UPSTREAM_ARCH: amd64/);
+  assert.doesNotMatch(workflow, /aarch64/);
+  assert.doesNotMatch(workflow, /arm64/);
   assert.match(workflow, /archlinux:base-devel@sha256:/);
   assert.match(workflow, /CODEX_TARGET_ARCH="\$UPSTREAM_ARCH"/);
   assert.match(workflow, /CODEX_LINUX_FEATURES_CONFIG=\/work\/linux-features\/features\.example\.json/);
