@@ -115,6 +115,29 @@ test("official Linux metadata expires after seven days", () => {
   assert.match(signedBaseline, /retention-days: 7/);
 });
 
+test("Arch release builds only manual-update pacman packages from signed Linux payloads", () => {
+  const workflow = read(".github/workflows/release-pacman.yml");
+  assert.match(workflow, /^  push:\n    branches: \[main\]/m);
+  assert.match(workflow, /^  workflow_dispatch:/m);
+  assert.match(workflow, /^  actions: read$/m);
+  assert.match(workflow, /^  contents: write$/m);
+  assert.match(workflow, /PACKAGE_WITH_UPDATER: "0"/);
+  assert.match(workflow, /upstream_arch: amd64/);
+  assert.match(workflow, /pacman_arch: x86_64/);
+  assert.match(workflow, /upstream_arch: arm64/);
+  assert.match(workflow, /pacman_arch: aarch64/);
+  assert.match(workflow, /ubuntu-24\.04-arm/);
+  assert.match(workflow, /archlinux:base-devel@sha256:/);
+  assert.match(workflow, /CODEX_TARGET_ARCH="\$UPSTREAM_ARCH"/);
+  assert.match(workflow, /CODEX_LINUX_FEATURES_CONFIG=\/work\/linux-features\/features\.example\.json/);
+  assert.match(workflow, /\.\/install\.sh/);
+  assert.match(workflow, /\.\/scripts\/build-pacman\.sh/);
+  assert.doesNotMatch(workflow, /PACMAN_STAGE_ONLY=1/);
+  assert.match(workflow, /gh run download "\$GITHUB_RUN_ID"/);
+  assert.match(workflow, /gh release create/);
+  assert.match(workflow, /SHA256SUMS/);
+});
+
 test("official Linux gate fails closed unless every dependency succeeds", () => {
   const workflow = read(".github/workflows/upstream-build-app.yml");
   const gate = job(workflow, "official-linux-gate");

@@ -59,6 +59,11 @@ cd codex-desktop-linux
 | NixOS or another Nix system | `nix run github:ilysenko/codex-desktop-linux` | Builds and runs the flake output; see [Nix](docs/nix.md) |
 | Atomic desktops or another distribution | `make build-app && make appimage` | Produces a local AppImage without the native updater |
 
+Prebuilt Arch packages for `x86_64` and `aarch64` are published in the
+[GitHub Releases](https://github.com/pygojrc/codex-desktop-linux/releases).
+Each release contains `SHA256SUMS`; download the package for your architecture,
+verify it, and install it manually with `sudo pacman -U ./codex-desktop-*.pkg.tar.zst`.
+
 The recommended native installation is:
 
 ```bash

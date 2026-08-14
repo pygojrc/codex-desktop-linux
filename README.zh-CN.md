@@ -56,6 +56,11 @@ cd codex-desktop-linux
 | NixOS 或其他 Nix 系统 | `nix run github:ilysenko/codex-desktop-linux` | 构建并运行 flake；参阅 [Nix](docs/nix.md) |
 | Atomic 桌面或其他发行版 | `make build-app && make appimage` | 生成不含原生更新器的本地 AppImage |
 
+`x86_64` 与 `aarch64` 的预构建 Arch 软件包会发布到
+[GitHub Releases](https://github.com/pygojrc/codex-desktop-linux/releases)。每个发布都包含
+`SHA256SUMS`；下载与系统架构匹配的包并校验后，使用
+`sudo pacman -U ./codex-desktop-*.pkg.tar.zst` 手动安装。
+
 推荐的原生安装命令：
 
 ```bash

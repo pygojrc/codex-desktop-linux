@@ -1,0 +1,194 @@
+name: Release Arch packages
+run-name: Release Arch packages from ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-pacman.yml
+      - install.sh
+      - Makefile
+      - launcher/**
+      - scripts/build-pacman.sh
+      - scripts/lib/package-common.sh
+      - scripts/lib/upstream-linux-package.*
+      - scripts/patches/**
+      - linux-features/**
+      - packaging/linux/**
+      - assets/openai-codex-linux-repository-key.gpg.base64
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: release-pacman-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # 发布包只允许由 pacman 手动更新，不携带 updater 或用户级 systemd 服务。
+  PACKAGE_WITH_UPDATER: "0"
+  ARCH_IMAGE: docker.io/library/archlinux:base-devel@sha256:fdff15f24df062598faebf380430955a9bd2109736e179ebb354f1208f725774
+
+jobs:
+  build-pacman:
+    if: github.repository == 'pygojrc/codex-desktop-linux'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - upstream_arch: amd64
+            pacman_arch: x86_64
+            runner: ubuntu-latest
+          - upstream_arch: arm64
+            pacman_arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Build signed-source pacman package in Arch Linux
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          PACMAN_ARCH: ${{ matrix.pacman_arch }}
+          UPSTREAM_ARCH: ${{ matrix.upstream_arch }}
+        run: |
+          set -Eeuo pipefail
+          docker run --rm \
+            -e GITHUB_SHA \
+            -e PACMAN_ARCH \
+            -e UPSTREAM_ARCH \
+            -e PACKAGE_WITH_UPDATER \
+            -e RUNNER_UID="$(id -u)" \
+            -e RUNNER_GID="$(id -g)" \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            "$ARCH_IMAGE" \
+            bash -lc '
+              set -Eeuo pipefail
+              pacman -Syu --noconfirm --needed \
+                base-devel ca-certificates curl dpkg git gnupg nodejs npm \
+                python tar unzip util-linux xz zstd
+
+              groupadd --gid "$RUNNER_GID" codex-release 2>/dev/null || true
+              useradd --uid "$RUNNER_UID" --gid "$RUNNER_GID" \
+                --create-home --shell /bin/bash codex-release 2>/dev/null || true
+              install -d -o "$RUNNER_UID" -g "$RUNNER_GID" /tmp/codex-release-home
+              chown -R "$RUNNER_UID:$RUNNER_GID" /work
+
+              # 构建器先通过固定 key 验证 InRelease、Packages 和官方 .deb 哈希。
+              runuser -u codex-release -- env \
+                HOME=/tmp/codex-release-home \
+                CODEX_TARGET_ARCH="$UPSTREAM_ARCH" \
+                CODEX_LINUX_FEATURES_CONFIG=/work/linux-features/features.example.json \
+                ./install.sh
+
+              upstream_version="$(runuser -u codex-release -- env \
+                HOME=/tmp/codex-release-home \
+                node -e '\''const info = require("./codex-app/.codex-linux/build-info.json"); const value = info.upstreamLinuxPackage?.version; if (typeof value !== "string" || !/^[0-9][0-9A-Za-z.+:~-]*$/.test(value)) process.exit(1); process.stdout.write(value);'\'')"
+              package_version="${upstream_version}+${GITHUB_SHA:0:12}"
+
+              runuser -u codex-release -- env \
+                HOME=/tmp/codex-release-home \
+                PACKAGE_VERSION="$package_version" \
+                PACKAGE_WITH_UPDATER="$PACKAGE_WITH_UPDATER" \
+                ./scripts/build-pacman.sh
+
+              package_file="dist/codex-desktop-${package_version}-1-${PACMAN_ARCH}.pkg.tar.zst"
+              test -f "$package_file"
+              package_sha256="$(sha256sum "$package_file" | awk '\''{print $1}'\'')"
+              node -e '\''const fs = require("node:fs"); fs.writeFileSync(process.argv[1], `${JSON.stringify({ upstreamVersion: process.argv[2], architecture: process.argv[3], packageFile: process.argv[4], sha256: process.argv[5] }, null, 2)}\n`);'\'' \
+                "dist/release-metadata-${PACMAN_ARCH}.json" \
+                "$upstream_version" "$PACMAN_ARCH" "$(basename "$package_file")" "$package_sha256"
+            '
+      - name: Upload pacman release input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pacman-${{ matrix.pacman_arch }}
+          path: |
+            dist/codex-desktop-*.pkg.tar.zst
+            dist/release-metadata-${{ matrix.pacman_arch }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    if: github.repository == 'pygojrc/codex-desktop-linux'
+    needs: build-pacman
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download both pacman packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir release-assets
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name pacman-x86_64 --dir release-assets
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name pacman-aarch64 --dir release-assets
+      - name: Verify release inputs and create checksums
+        id: release
+        run: |
+          set -Eeuo pipefail
+          node - release-assets <<'NODE'
+          const crypto = require("node:crypto");
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const root = process.argv[2];
+          const expected = ["x86_64", "aarch64"];
+          const metadata = expected.map((architecture) => {
+            const file = path.join(root, `release-metadata-${architecture}.json`);
+            return JSON.parse(fs.readFileSync(file, "utf8"));
+          });
+          const versions = new Set(metadata.map(({ upstreamVersion }) => upstreamVersion));
+          if (versions.size !== 1) throw new Error(`architectures resolved different upstream versions: ${JSON.stringify(metadata)}`);
+          for (const item of metadata) {
+            const packagePath = path.join(root, item.packageFile);
+            const actual = crypto.createHash("sha256").update(fs.readFileSync(packagePath)).digest("hex");
+            if (actual !== item.sha256) throw new Error(`SHA-256 mismatch for ${item.packageFile}`);
+          }
+          fs.writeFileSync(path.join(root, "release-info.json"), `${JSON.stringify({ upstreamVersion: metadata[0].upstreamVersion, packages: metadata }, null, 2)}\n`);
+          NODE
+          (
+            cd release-assets
+            sha256sum codex-desktop-*.pkg.tar.zst > SHA256SUMS
+          )
+          upstream_version="$(node -p 'require("./release-assets/release-info.json").upstreamVersion')"
+          release_tag="arch-${upstream_version}-${GITHUB_SHA:0:12}"
+          {
+            echo "upstream_version=$upstream_version"
+            echo "release_tag=$release_tag"
+          } >> "$GITHUB_OUTPUT"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+          UPSTREAM_VERSION: ${{ steps.release.outputs.upstream_version }}
+        run: |
+          set -Eeuo pipefail
+          cat > release-notes.md <<EOF
+          基于已验证的 OpenAI 官方 Linux 包 ${UPSTREAM_VERSION} 构建的 Arch/Manjaro 软件包。
+
+          此发布仅包含 pacman 软件包，且固定关闭 codex-update-manager；请手动下载并安装适合当前架构的文件：
+
+          \`\`\`bash
+          sudo pacman -U ./codex-desktop-*.pkg.tar.zst
+          \`\`\`
+
+          请先使用同一发布中的 \`SHA256SUMS\` 校验下载文件。官方 ChatGPT 与 ChatGPT Community 共用上游 Codex profile，请勿同时运行。
+          EOF
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/codex-desktop-*.pkg.tar.zst \
+              release-assets/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --title "Arch 软件包 ${UPSTREAM_VERSION}" \
+              --notes-file release-notes.md --latest --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" release-assets/codex-desktop-*.pkg.tar.zst \
+              release-assets/SHA256SUMS --target "$GITHUB_SHA" \
+              --title "Arch 软件包 ${UPSTREAM_VERSION}" \
+              --notes-file release-notes.md --latest --repo "$GITHUB_REPOSITORY"
+          fi
