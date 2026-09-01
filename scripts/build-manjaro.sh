@@ -41,16 +41,27 @@ pkgver="${pkgver//-/_}"
 info "Extracting data archive with dpkg-deb"
 dpkg-deb -x "$deb_path" "$WORK_DIR/stage"
 
+# Keep /usr/bin/chatgpt as a real wrapper rather than the upstream symlink.
+# This makes both KDE launches and direct command-line launches use Fcitx5.
+chatgpt_wrapper="$WORK_DIR/stage/usr/bin/chatgpt"
+[[ -e "$chatgpt_wrapper" || -L "$chatgpt_wrapper" ]] || die "upstream chatgpt launcher is missing"
+rm -f "$chatgpt_wrapper"
+cat > "$chatgpt_wrapper" <<'EOF'
+#!/bin/sh
+set -eu
+export GTK_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+exec /usr/lib/chatgpt/codex-launcher "$@"
+EOF
+chmod 0755 "$chatgpt_wrapper"
+
 desktop_file="$WORK_DIR/stage/usr/share/applications/chatgpt.desktop"
 [[ -f "$desktop_file" ]] || die "upstream desktop entry is missing"
-
-# KDE launches the desktop file directly. These two variables make Fcitx5's
-# XWayland frontend reliable for Rime/Wubi without changing the Electron app.
 sed -i \
-  's|^Exec=chatgpt %U$|Exec=env GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx chatgpt %U|' \
+  's|^Exec=env GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx chatgpt %U$|Exec=chatgpt %U|' \
   "$desktop_file"
-grep -Fqx 'Exec=env GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx chatgpt %U' "$desktop_file" \
-  || die 'failed to add Fcitx5 environment to the KDE desktop entry'
+grep -Fqx 'Exec=chatgpt %U' "$desktop_file" \
+  || die 'unexpected ChatGPT desktop entry'
 
 cat > "$WORK_DIR/pkgbuild/PKGBUILD" <<EOF
 $(sed "s/^pkgver=.*/pkgver=$pkgver/" "$REPO_DIR/PKGBUILD")

@@ -14,7 +14,7 @@ APT repository.
 On Manjaro/Arch:
 
 ```bash
-sudo pacman -S --needed base-devel ca-certificates curl dpkg jq
+sudo pacman -S --needed base-devel ca-certificates curl dpkg
 ./scripts/build-manjaro.sh
 sudo pacman -U dist/codex-desktop-*.pkg.zst
 ```
@@ -23,9 +23,18 @@ The output is x86_64-only and uses the exact version reported by the current
 official `.deb`. Override `CHATGPT_DEB_URL` only when deliberately testing a
 different official package.
 
-The installed KDE desktop entry sets `GTK_IM_MODULE=fcitx` and
-`XMODIFIERS=@im=fcitx`, which keeps Fcitx5 Rime/Wubi input working in the
-XWayland launch path. Install `fcitx5` and `fcitx5-rime` separately when needed.
+The one-command installer downloads the latest Release asset, checks its
+SHA-256 checksum, and installs it with `pacman`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pygojrc/codex-desktop-linux/main/install.sh | sh
+```
+
+`/usr/bin/chatgpt` is a real wrapper script. It always sets
+`GTK_IM_MODULE=fcitx` and `XMODIFIERS=@im=fcitx` before executing the official
+runtime, so both KDE application-menu launches and direct command-line launches
+use the same Fcitx5 environment. Install `fcitx5` and `fcitx5-rime` separately
+when needed.
 
 ## Releases
 
