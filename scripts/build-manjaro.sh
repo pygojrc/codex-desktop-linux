@@ -70,7 +70,10 @@ makepkg_path="$DIST_DIR/${PACKAGE_NAME}-${pkgver}-1-x86_64.pkg.tar.zst"
 [[ -f "$makepkg_path" ]] || die "makepkg did not create the standard package: $makepkg_path"
 mv -- "$makepkg_path" "$package_path"
 [[ -f "$package_path" ]] || die "package was not created: $package_path"
-sha256sum "$package_path" > "$package_path.sha256"
+(
+  cd "$DIST_DIR"
+  sha256sum "$(basename "$package_path")" > "$(basename "$package_path").sha256"
+)
 cat > "$DIST_DIR/release-metadata.json" <<EOF
 {
   "package": "$(basename "$package_path")",
