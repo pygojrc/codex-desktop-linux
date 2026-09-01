@@ -15,6 +15,8 @@ info() { printf '==> %s\n' "$*" >&2; }
 command -v curl >/dev/null || die 'curl is required'
 command -v dpkg-deb >/dev/null || die 'dpkg-deb is required'
 command -v makepkg >/dev/null || die 'makepkg is required'
+command -v node >/dev/null || die 'node is required'
+command -v npx >/dev/null || die 'npx is required'
 
 mkdir -p "$DIST_DIR" "$WORK_DIR"
 rm -rf "$WORK_DIR/stage" "$WORK_DIR/pkgbuild"
@@ -40,6 +42,19 @@ pkgver="${pkgver//-/_}"
 # are intentionally excluded, so the package cannot install an APT source.
 info "Extracting data archive with dpkg-deb"
 dpkg-deb -x "$deb_path" "$WORK_DIR/stage"
+
+# Patch the official webview bundle before repackaging.
+asar_dir="$WORK_DIR/app-asar"
+patched_asar="$WORK_DIR/app.asar.patched"
+mkdir -p "$asar_dir"
+info "Patching quick slider default: gpt-5.6-luna:medium first"
+npx --yes @electron/asar@4.3.0 extract \
+  "$WORK_DIR/stage/usr/lib/chatgpt/resources/app.asar" \
+  "$asar_dir"
+node "$REPO_DIR/scripts/patch-quick-model-picker.js" \
+  "$asar_dir/webview/assets"
+npx --yes @electron/asar@4.3.0 pack "$asar_dir" "$patched_asar"
+mv -- "$patched_asar" "$WORK_DIR/stage/usr/lib/chatgpt/resources/app.asar"
 
 # Keep /usr/bin/chatgpt as a real wrapper rather than the upstream symlink.
 # This makes both KDE launches and direct command-line launches use Fcitx5.
@@ -93,7 +108,8 @@ cat > "$DIST_DIR/release-metadata.json" <<EOF
   "upstreamVersion": "$upstream_version",
   "upstreamUrl": "$UPSTREAM_URL",
   "architecture": "x86_64",
-  "inputMethod": "GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx"
+  "inputMethod": "GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx",
+  "quickSliderPatch": "gpt-5.6-luna:medium-first"
 }
 EOF
 info "Built: $package_path"

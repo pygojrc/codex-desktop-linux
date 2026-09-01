@@ -7,6 +7,7 @@ on:
       - .github/workflows/release-manjaro.yml
       - PKGBUILD
       - scripts/build-manjaro.sh
+      - scripts/patch-quick-model-picker.js
   workflow_dispatch:
 
 permissions:
@@ -36,7 +37,7 @@ jobs:
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
             "$ARCH_IMAGE" bash -euxo pipefail -c '
-              pacman -Syu --noconfirm --needed ca-certificates curl dpkg git
+              pacman -Syu --noconfirm --needed ca-certificates curl dpkg git nodejs npm
               groupadd --gid "$RUNNER_GID" codex-build 2>/dev/null || true
               useradd --uid "$RUNNER_UID" --gid "$RUNNER_GID" --create-home --shell /bin/bash codex-build 2>/dev/null || true
               chown -R "$RUNNER_UID:$RUNNER_GID" /work

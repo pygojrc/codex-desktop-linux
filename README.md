@@ -14,7 +14,7 @@ APT repository.
 On Manjaro/Arch:
 
 ```bash
-sudo pacman -S --needed base-devel ca-certificates curl dpkg
+sudo pacman -S --needed base-devel ca-certificates curl dpkg nodejs npm
 ./scripts/build-manjaro.sh
 sudo pacman -U dist/codex-desktop-*.pkg.zst
 ```
@@ -35,6 +35,10 @@ curl -fsSL https://raw.githubusercontent.com/pygojrc/codex-desktop-linux/main/in
 runtime, so both KDE application-menu launches and direct command-line launches
 use the same Fcitx5 environment. Install `fcitx5` and `fcitx5-rime` separately
 when needed.
+
+The quick Power slider is patched at build time so `gpt-5.6-luna:medium` is the
+first quick-slider option when the package is built. The patch keeps the
+upstream model list and server-side permission checks.
 
 ## Releases
 
