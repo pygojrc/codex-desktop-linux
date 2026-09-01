@@ -141,21 +141,21 @@
 在 Manjaro 上可以先确认官方 bundle 的位置：
 
 ```bash
-find /usr/lib/chatgpt -type f \\
-  \\( -name '*.asar' -o -name 'app-initial-*.js' \\) -print
+find /usr/lib/chatgpt -type f \
+  \( -name '*.asar' -o -name 'app-initial-*.js' \) -print
 ```
 
 如果系统安装了 `asar` 工具，再检查 archive 内的目标文件：
 
 ```bash
-asar list /usr/lib/chatgpt/resources/app.asar \\
+asar list /usr/lib/chatgpt/resources/app.asar \
   | rg 'app-initial|webview|preload'
 ```
 
 直接搜索定位字符串：
 
 ```bash
-strings /usr/lib/chatgpt/resources/app.asar \\
+strings /usr/lib/chatgpt/resources/app.asar \
   | rg 'composer-model-picker|chatgpt-model-picker|supportedReasoningEfforts|gpt-5.6-luna'
 ```
 
