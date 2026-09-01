@@ -442,4 +442,19 @@ let W = x ? ["gpt-5.6-luna"] : []
 5. 无 Luna 权限时不显示伪造选项、不影响原有 Sol/Terra；
 6. 滑动控件、详细模型菜单、Wubi/Fcitx 输入均正常。
 
-本节只记录实现评估，尚未修改 bundle、构建脚本或发布新包。
+本节的评估已在构建流程中实现，具体如下：
+
+- `scripts/patch-quick-model-picker.js` 在官方 `app.asar` 解包后，定位唯一的 `app-primary-*.js`；
+- 构建脚本保留官方 `hur` 实现为 `codexLinuxOriginalHur`，再包一层 `hur`；
+- 包装层把 `gpt-5.6-luna:medium` 放到 `powerSelections` 最前面，并重新计算 `powerSettingIndex`；
+- 如果服务端模型列表已经提供 Luna medium，则优先使用真实候选；如果没有，则插入用户要求的默认 Luna medium 快速项；
+- 原有 Terra/Sol 快速档位保持在后面，详细模型菜单和请求回调未被替换；
+- 构建使用 `@electron/asar` 重新打包归档，失败时因 marker/结构校验不通过而停止，不会静默生成未 patch 的包。
+
+已完成并发布：
+
+- 实现提交：[`2fdbf2e`](https://github.com/pygojrc/codex-desktop-linux/commit/2fdbf2eb62cafd45a15bc056122c879641fc216e)
+- Actions 构建：[#7](https://github.com/pygojrc/codex-desktop-linux/actions/runs/33557685389)
+- Manjaro KDE x86_64 Release：[`manjaro-kde-26.831.20005`](https://github.com/pygojrc/codex-desktop-linux/releases/tag/manjaro-kde-26.831.20005)
+
+验证时应注意：没有 Luna 权限的账号也会看到这个实验性默认快速项；点击后仍由服务端决定是否接受 `gpt-5.6-luna` 请求。若需要严格按账号权限隐藏该项，应把包装层改为“仅当实际模型列表包含 Luna 时前置”。
