@@ -1,169 +1,317 @@
-# 快速模型选择器代码分析
+# 快速模型选择器：当前官方包解包分析
 
-- 分析仓库：`pygojrc/codex-desktop-linux`
-- 分析基线：`8fd522346cac878db34cf5d242a71cdccc4f92aa`
+- 仓库：`pygojrc/codex-desktop-linux`
+- 分析包：Release `manjaro-kde-26.831.20005`
+- 包文件：`codex-desktop-26.831.20005-1-x86_64.pkg.zst`
+- 包 SHA-256：`c7fcd75cbe91fa402c3bf2f157eb75abb7ac70218f2d6a3c11fcbd6e815d8d0d`
 - 目标平台：Manjaro KDE x86_64
-- 结论：当前仓库没有快速模型选择器的业务代码；选择器属于官方 ChatGPT Linux 应用的打包运行时。
 
-## 一、当前仓库实际包含什么
+## 结论
 
-当前构建链是：
+本次已实际解包并校验 `app.asar`。当前版本的快速模型选择器不在历史补丁所说的 `app-initial-*.js`，而在：
 
 ```
-官方 chatgpt_amd64.deb
-    -> dpkg-deb -x
-    -> 替换 /usr/bin/chatgpt 为 Fcitx 包装脚本
-    -> makepkg
-    -> codex-desktop-*.pkg.zst
+/usr/lib/chatgpt/resources/app.asar
+└── webview/assets/app-primary-a0bff570446b.js
 ```
 
-关键位置：
+主 bundle 是压缩的一行 JavaScript，文件大小为 7,777,355 字节。模型选择器相关代码位于大约 6,495,000～7,073,000 字节偏移处。
 
-| 位置 | 作用 | 是否包含模型选择器实现 |
-| --- | --- | --- |
-| `PKGBUILD` | 声明 Manjaro/Arch 包元数据和依赖 | 否 |
-| `scripts/build-manjaro.sh` | 下载官方 `.deb`、解包、写入包装脚本、重打包 | 否 |
-| `/usr/bin/chatgpt` | 启动包装脚本，设置 Fcitx 环境后执行官方运行时 | 否 |
-| `/usr/lib/chatgpt/codex-launcher` | 官方应用启动入口 | 不是选择器源码 |
-| 官方运行时的 `resources/app.asar` 及其中的 webview bundle | Electron 应用和 ChatGPT Web UI | 是，快速模型选择器在这里 |
+## 一、解包结果
 
-当前项目的构建脚本只调用 `dpkg-deb -x` 提取 data archive，不执行 Debian maintainer scripts，也没有修改 `app.asar`。因此，在当前已发布的包中，模型选择器仍然是官方应用原样提供的。
+包内实际确认到：
 
-## 二、快速滑动选择器的代码位置
+| 文件 | 大小 | 作用 |
+| --- | ---: | --- |
+| `/usr/lib/chatgpt/resources/app.asar` | 292,412,845 字节 | Electron 主应用归档 |
+| `/usr/lib/chatgpt/resources/busy-bar.asar` | 1,013,392 字节 | Busy Bar 独立归档，不是模型选择器 |
+| `app.asar/webview/assets/app-primary-a0bff570446b.js` | 7,777,355 字节 | 当前模型选择器所在主 webview bundle |
+| `app.asar/webview/assets/app-initial-cccb87527a41.js` | 9,994,496 字节 | 当前包存在，但没有找到 `composer-model-picker` 标记 |
 
-这里需要区分两个 UI：
+本次操作只在临时分析目录中完成了解包，没有修改或覆盖系统安装文件，也没有修改 Release 包。
 
-1. 紧凑的 Power/快速滑动控件：滑动的是 reasoning effort（例如 low、medium、high 等），实际可用档位来自模型对象的 `supportedReasoningEfforts`。
-2. 详细模型列表：显示具体模型选项，运行时结构中表现为 `config.model.options`。
+## 二、当前版本的快速滑动控件
 
-历史仓库中保留过一份针对官方 bundle 的定位补丁。它不是当前项目的依赖，但可以作为代码定位依据：
+### 1. 核心构造函数：`hur`
 
-- [历史 model-picker-model-list.js](https://github.com/ilysenko/codex-desktop-linux/blob/705620c37f7d2e2b0e1ca286ff1d723dd5db127b/linux-features/ui-tweaks/patches/model-picker-model-list.js)
-- [历史 ui-tweaks/patch.js](https://github.com/ilysenko/codex-desktop-linux/blob/705620c37f7d2e2b0e1ca286ff1d723dd5db127b/linux-features/ui-tweaks/patch.js)
+在 `app-primary-a0bff570446b.js` 中：
 
-该补丁通过以下特征定位官方压缩 bundle：
+```js
+function hur(e, {
+  includeUltraInSlider,
+  removeXHigh,
+  sliderModelsConfig
+} = {})
+```
 
-- 文件名匹配：`app-initial-*.js`
-- 菜单视图标记：`composer-model-picker-menu-view-v1`、`composer-model-picker-menu-view-v2`
-- 组件标记：`chatgpt-model-picker`
-- 模型选项渲染：`.options.map(...)`
-- 推理档位计算：`supportedReasoningEfforts`
+它返回快速 Power/Reasoning 滑动控件使用的 `powerSelections`。
 
-对应函数如下：
+处理顺序：
 
-| 函数 | 作用 |
+1. 如果存在 `sliderModelsConfig.presets`，先按远程/运行时 preset 生成候选；
+2. 将 preset 中的 `model` 和 `reasoning_effort` 与当前模型列表匹配；
+3. 如果匹配结果至少有 3 项，则使用该结果；
+4. 否则使用 bundle 内置的静态 `wur`；
+5. 如果仍不足 3 项，回退到静态 `Eur`；
+6. `ultra` 和 `xhigh` 是否参与由 `includeUltraInSlider`、`removeXHigh` 控制。
+
+因此，快速滑动列表不是单纯的 UI 标签数组，而是“preset + 当前可用模型 + supported reasoning effort”的交集。
+
+### 2. 当前版本实际静态候选
+
+当前 bundle 中可以直接读到：
+
+```js
+wur = [
+  { id: "gpt-5.6-terra:low",  model: "gpt-5.6-terra", modelLabel: "5.6 Terra", reasoningEffort: "low" },
+  { id: "gpt-5.6-sol:low",    model: "gpt-5.6-sol",   modelLabel: "5.6 Sol",   reasoningEffort: "low" },
+  { id: "gpt-5.6-sol:medium", model: "gpt-5.6-sol",   modelLabel: "5.6 Sol",   reasoningEffort: "medium" },
+  { id: "gpt-5.6-sol:high",   model: "gpt-5.6-sol",   modelLabel: "5.6 Sol",   reasoningEffort: "high" },
+  { id: "gpt-5.6-sol:xhigh",  model: "gpt-5.6-sol",   modelLabel: "5.6 Sol",   reasoningEffort: "xhigh" }
+]
+
+Tur = {
+  id: "gpt-5.6-sol:ultra",
+  model: "gpt-5.6-sol",
+  modelLabel: "5.6 Sol",
+  reasoningEffort: "ultra"
+}
+
+Eur = [
+  { id: "gpt-5.6-terra:low",    model: "gpt-5.6-terra", reasoningEffort: "low" },
+  { id: "gpt-5.6-terra:medium", model: "gpt-5.6-terra", reasoningEffort: "medium" },
+  { id: "gpt-5.6-terra:high",   model: "gpt-5.6-terra", reasoningEffort: "high" },
+  { id: "gpt-5.6-terra:xhigh",  model: "gpt-5.6-terra", reasoningEffort: "xhigh" }
+]
+```
+
+注意：这是当前版本真实存在的静态列表。它并不包含 `gpt-5.6-luna`。Luna 通过另一个条件分支动态加入。
+
+### 3. 相关辅助函数
+
+| 函数/变量 | 当前作用 |
 | --- | --- |
-| `applyDefaultAdvancedViewPatch` | 将模型选择器默认视图从 simple 切换到 advanced |
-| `applyInlineModelListPatch` | 把 `config.model.options` 直接渲染到列表中 |
-| `findDynamicPowerSelectionsFunction` | 定位快速 Power 选择器的档位计算函数 |
-| `applyDynamicSupportedReasoningEffortsPatch` | 根据模型支持的 reasoning effort 动态构造快速滑动档位 |
-| `applyModelPickerModelListPatch` | 组合上述模型选择器补丁 |
+| `vur(e)` | 将模型对象的 `supportedReasoningEfforts` 展开为 `model:reasoningEffort` 候选 |
+| `xur(e, t)` | 只保留存在于当前模型列表、且 reasoning effort 仍受支持的候选，并设置 `powerSettingIndex` |
+| `q4(e, t)` | 获取选中模型的 `supportedReasoningEfforts` |
+| `S9n(e, t)` | 校正当前 reasoning effort，使其落在可用档位中 |
+| `C9n(e, t, n)` / `w9n(e, t)` | 在相邻 reasoning effort 档位之间切换 |
+| `hur(e, ...)` | 组合 preset、静态列表和当前模型列表，生成快速滑动选择项 |
+| `idr(e)` | 渲染 `powerSelections` 对应的滑动控件 |
+| `kur()` | 延迟加载 `./impl-acbd30e29fda.js` 中的 `ModelPickerPowerSliderImpl` |
 
-因此，“快速滑动选择模型”的核心不是一个可以在当前仓库直接编辑的固定数组，而是官方 webview bundle 中的模型过滤和 reasoning-effort 映射逻辑。
+## 三、详细模型列表的位置
 
-## 三、是否可以增加或修改快速模型列表
+模型选择器控制器是压缩后的函数 `$Or(e)`，大约位于 bundle 偏移 7,054,732 附近。
 
-可以，但有前提，且需要修改构建阶段的官方 `app.asar`；仅修改 `PKGBUILD`、`/usr/bin/chatgpt` 或 KDE desktop entry 不能改变模型列表。
+它的主要流程是：
 
-### 1. Luna 已经由上游返回时
+```
+UT({ additionalAvailableModels, hostId })
+  -> 得到模型列表
+  -> modelsForPicker(...)
+  -> 过滤可用模型
+  -> vur(...)
+  -> hur(...)
+  -> 传给模型选择器菜单
+```
 
-如果上游的模型接口已经返回 Luna，例如：
+在 `$Or` 中可以看到：
 
-```json
-{
-  "model": "gpt-5.6-luna",
-  "hidden": false,
-  "supportedReasoningEfforts": ["low", "medium", "high"]
+- `te`：经过 `modelsForPicker` 处理后的模型列表；
+- `ue`：经过可用性处理后的模型选项；
+- `je=ue?.filter(skr).map(okr)`：取出未禁用模型；
+- `Me=vur(je)`：把模型展开成 model/reasoning 候选；
+- `Le=hur(je,...)`：构造快速滑动列表；
+- `v?.map(...)`：渲染详细模型菜单中的每一项；
+- 选中时调用 `le(model, reasoningEffort)`。
+
+菜单渲染函数 `fOr(e)` 大约位于偏移 7,022,xxx，负责把 `modelOptions` 渲染成菜单项。快速滑动控件则通过 `Dfr`、`idr` 和延迟加载的 `ModelPickerPowerSliderImpl` 渲染。
+
+## 四、当前版本的 Luna 分支
+
+当前 bundle 中确实存在 `gpt-5.6-luna`，关键代码位于 `$Or`：
+
+```js
+let x = vc(ur, b.hostId)
+
+let W = x ? ["gpt-5.6-luna"] : []
+
+let G = new Set([...additionalAvailableModels, ...W, selectedModel])
+
+let { data: J } = UT({
+  additionalAvailableModels: G,
+  hostId: K
+})
+```
+
+随后：
+
+```let ne = te?.find(ckr)
+let re = te
+
+if (x) {
+  re = ne == null ? [] : [{ ...ne, model: fIe }]
 }
 ```
 
-并且当前账号、灰度开关和服务端权限允许，那么详细模型列表通常可以自动显示它。历史补丁的测试数据也曾使用 `gpt-5.6-luna` 和 `gpt-5.6-terra` 作为可见模型示例。
+过滤函数为：
 
-这种情况下，优先检查：
-
-- `model/list` 返回值中是否有 Luna；
-- `hidden` 是否为 false；
-- ChatGPT web UI 的 rollout/allowlist 是否过滤了它；
-- 当前账号是否有该模型权限。
-
-如果 Luna 被服务端返回但只被本地的 `available_models` allowlist 隐藏，修改过滤条件可能有用；如果服务端没有返回，单纯在 UI 中增加一项并不能保证请求成功。
-
-### 2. 让 Luna 出现在紧凑 Power/快速滑动控件中
-
-这和“详细模型列表出现 Luna”不是同一件事。快速滑动控件通常根据 `supportedReasoningEfforts` 生成档位，并且需要满足当前 bundle 的最少档位数量和筛选规则。
-
-因此 Luna 要进入快速控件，至少要满足：
-
-- Luna 是当前会话实际选中的模型；
-- Luna 有足够的 `supportedReasoningEfforts`；
-- 该模型没有被 `hidden`、服务端 allowlist 或客户端 host/auth 规则过滤；
-- 快速控件的 resolver 接受该模型，而不是只处理某个硬编码模型 ID。
-
-如果目标只是“在快速入口能选 Luna 模型”，更可能需要修改模型候选项映射，而不是只改滑块的标签。模型 ID 必须使用上游真实接受的 ID，不能只显示一个自定义名称。
-
-### 3. 上游没有返回 Luna 时
-
-也可以做实验性 UI 注入，但风险较高：
-
-- UI 可以显示选项，但后端可能拒绝该模型 ID；
-- 可能被登录方式、订阅等级、区域或 rollout 再次过滤；
-- 新版 ChatGPT 更新后，压缩变量名、bundle 文件名和函数结构可能变化；
-- 错误 patch 可能导致 webview 白屏或模型选择器无法打开。
-
-所以不建议把一个未经服务端确认的 Luna ID 写死为默认发布功能。
-
-## 四、建议的实现方式
-
-若要实际加入 Luna，建议把修改放在 `scripts/build-manjaro.sh` 的 `dpkg-deb -x` 之后、`makepkg` 之前：
-
-```
-解包官方 .deb
-  -> 识别 resources/app.asar
-  -> 解包 app.asar
-  -> 按 app-initial-*.js 和稳定字符串定位模型选择器
-  -> 修改候选模型/allowlist 或显示逻辑
-  -> 重新打包 app.asar
-  -> 运行针对当前上游版本的 bundle fixture 测试
-  -> makepkg
+```function ckr(e) {
+  let { model: t } = e
+  return t === "gpt-reserve" || t === "gpt-5.6-luna"
+}
 ```
 
-应遵守以下边界：
+这说明：
 
-- 不恢复或引入 `ilysenko/codex-desktop-linux` 的完整功能树；
-- 只保留一个小型、版本感知的构建补丁；
-- patch 找不到稳定 marker 时应跳过或失败，不要对所有 JS 做无条件替换；
-- 每个上游版本构建后检查模型选择器是否仍能打开；
-- 至少验证详细列表、Power 滑块、发送请求和 Fcitx/Wubi 输入；
-- 在 release metadata 中记录上游版本和 patch 是否命中。
+1. Luna 不是简单地写进静态 Power slider 数组；
+2. 当 `x` 为真时，代码把 `gpt-5.6-luna` 加入模型查询的 `additionalAvailableModels`；
+3. 然后从返回模型中选择 Luna/Reserve 候选，并把模型选项重写为内部的 Luna 选择；
+4. `x` 来自压缩后的运行时 selector `vc(ur, b.hostId))，其具体符号名没有通过源码映射恢复；
+5. `allowAeonDraftModelSelection`、`isAeonDraft`、`modelHostId` 等字段与这条特殊模型路径同时出现，表明 Luna 分支属于受权限/功能开关控制的特殊流程。
 
-## 五、如何在已安装版本中确认实际文件
+另外，bundle 中还有：
 
-在 Manjaro 上可以先确认官方 bundle 的位置：
+```gpt-5.6-luna-wm
+```
+
+它出现在 work-mode 相关逻辑中，不应与 composer 快速模型选择器的 `gpt-5.6-luna` 分支混为一谈。
+
+## 五、能否把 Luna 加入快速滑动列表
+
+可以，但要先区分目标。
+
+### 目标 A：详细模型菜单显示 Luna
+
+当前版本已经具备 Luna 的动态接入代码。更合理的做法是确认 `x` 对应的运行时条件是否满足，而不是直接伪造 UI 文本。
+
+如果 `x` 为真，模型查询会收到 `gpt-5.6-luna` 作为额外模型候选。仍需满足：
+
+- 账号/订阅拥有 Luna 权限；
+- 服务端返回该模型；
+- 模型没有被禁用；
+- 当前请求链路接受真实模型 ID。
+
+### 目标 B：Luna 出现在 Power 快速滑动控件
+
+需要同时修改或满足：
+
+- Luna 被加入当前 `je` 模型集合；
+- Luna 的模型对象有有效的 `supportedReasoningEfforts`；
+- `vur(je)` 能生成 Luna 的 `model:reasoningEffort` 条目；
+- `hur(je,...)` 的 preset 或 fallback 能产生至少 3 个有效条目；
+- `xur` 的交集检查通过；
+- 选择回调 `le(model, reasoningEffort)` 将真实 Luna ID 发送到后端。
+
+只增加：
+
+```js
+{ model: "gpt-5.6-luna", modelLabel: "5.6 Luna", reasoningEffort: "medium" }
+```
+
+通常是不够的，因为快速滑动控件有“至少 3 个有效档位”的门槛，而且后端模型列表、权限和 reasoning effort 仍然会参与过滤。
+
+## 六、建议的 patch 点
+
+如果后续决定在本项目构建时加入实验性 Luna 支持，推荐按以下优先级：
+
+### 优先方案：启用现有 Luna 分支
+
+在解包后的 `app-primary-*.js` 中，围绕 `$Or` 的以下逻辑做版本感知 patch：
+
+```js
+let x = vc(ur, b.hostId)
+let W = x ? ["gpt-5.6-luna"] : []
+...
+if (x) {
+  re = ne == null ? [] : [{ ...ne, model: fIe }]
+}
+```
+
+但不能只把 `x` 的一个表达式替换为常量，必须验证：
+
+- `UT` 是否返回 Luna；
+- `ne=te.find(ckr)` 是否找到 Luna；
+- `fIe` 是否为后端真正接受的模型 ID；
+- composer、work mode 和已有模型选择是否没有被破坏。
+
+### 备选方案：修改 `hur` 的 preset/fallback
+
+如果目标只是让 Luna 在滑动条中有 3 个 reasoning 档位，可以在 `hur` 的 preset/fallback 逻辑中加入 Luna 候选。但这只适合 Luna 已经存在于当前模型集合的情况；否则 `xur` 会把它全部过滤掉。
+
+### 不建议方案：只改静态 `wur`
+
+直接把 Luna 写入 `wur` 最容易实现，但当前代码随后仍会经过 `xur` 与 `supportedReasoningEfforts` 的交集验证。它还绕过了当前版本已经存在的特殊 Luna 流程，升级后也最容易失效。
+
+## 七、后续构建实现位置
+
+本项目当前构建脚本在：
+
+```
+scripts/build-manjaro.sh
+```
+
+应在：
+
+```
+dpkg-deb -x
+    -> 定位 resources/app.asar
+    -> 解包 app.asar
+    -> 定位 webview/assets/app-primary-*.js
+    -> 按稳定 marker/函数结构 patch
+    -> 重新打包 app.asar
+    -> makepkg
+```
+
+建议 patch 使用：
+
+- bundle 文件模式：`webview/assets/app-primary-*.js`
+- 稳定 marker：`chatgpt-model-picker`、`supportedReasoningEfforts`、`sliderModelsConfig`、`gpt-5.6-luna`
+- 结构 marker：`function hur`、`function vur`、`function xur`、`function ckr`
+- 版本校验：文件 hash/上游版本/marker 数量
+- 失败策略：marker 不匹配时停止构建，不做无条件全文替换
+
+不能把 `app-primary-a0bff570446b.js` 的 hash 当成永久路径；下一次官方包更新后 hash 很可能变化。
+
+## 八、复现分析命令
+
+在已安装版本中：
 
 ```bash
-find /usr/lib/chatgpt -type f \
-  \( -name '*.asar' -o -name 'app-initial-*.js' \) -print
+find /usr/lib/chatgpt -type f \\
+  \\( -name '*.asar' -o -name 'app-primary-*.js' \\) -print
 ```
 
-如果系统安装了 `asar` 工具，再检查 archive 内的目标文件：
+解包：
 
 ```bash
-asar list /usr/lib/chatgpt/resources/app.asar \
-  | rg 'app-initial|webview|preload'
+npx --yes @electron/asar extract \\
+  /usr/lib/chatgpt/resources/app.asar \\
+  ./app-asar
 ```
 
-直接搜索定位字符串：
+定位当前 bundle：
+
+```find ./app-asar -type f -name 'app-primary-*.js' -print```
+
+搜索关键逻辑：
 
 ```bash
-strings /usr/lib/chatgpt/resources/app.asar \
-  | rg 'composer-model-picker|chatgpt-model-picker|supportedReasoningEfforts|gpt-5.6-luna'
+rg -o -F 'function hur' ./app-asar/webview/assets
+rg -o -F 'function vur' ./app-asar/webview/assets
+rg -o -F 'function xur' ./app-asar/webview/assets
+rg -o -F 'gpt-5.6-luna' ./app-asar/webview/assets
+rg -o -F 'supportedReasoningEfforts' ./app-asar/webview/assets
 ```
 
-上游版本变化时，`app-initial-<hash>.js` 中的 hash 会变化；因此不能把某一个 hash 当成永久路径，应该用文件名模式和稳定 marker 定位。
+## 最终判断
 
-## 六、最终判断
+当前版本比历史补丁更明确：
 
-- 当前仓库没有可直接修改的“快速模型列表”源码，相关代码在官方 ChatGPT Linux `app.asar` 的压缩 webview bundle 中。
-- 历史补丁已明确给出可定位的 bundle 模式、菜单 marker、模型选项渲染点和 Power slider resolver。
-- 可以增加/修改 Luna，但应该在构建时 patch 官方 `app.asar`，并同时验证服务端模型 ID、权限和 `supportedReasoningEfforts`。
-- 如果 Luna 已由 `model/list` 返回，优先修正客户端过滤/allowlist；如果没有返回，不建议仅靠 UI 硬编码后直接发布。
+- 快速滑动核心是 `hur`；
+- 当前静态快速候选是 Sol/Terra，不含 Luna；
+- Luna 已经存在专门的条件分支；
+- Luna 是否进入模型查询和模型选择器由 `x=vc(ur,b.hostId)` 控制；
+- 要把 Luna 稳定加入快速滑动列表，最佳路径是复用/验证现有 Luna 分支，再处理 `supportedReasoningEfforts` 和 `hur` 的至少 3 档校验；
+- 当前项目只负责打包，实际修改必须在构建阶段 patch 官方 `app.asar`，不能恢复旧第三方仓库代码。
