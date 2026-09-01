@@ -279,21 +279,21 @@ dpkg-deb -x
 在已安装版本中：
 
 ```bash
-find /usr/lib/chatgpt -type f \\
-  \\( -name '*.asar' -o -name 'app-primary-*.js' \\) -print
+find /usr/lib/chatgpt -type f \
+  \( -name '*.asar' -o -name 'app-primary-*.js' \) -print
 ```
 
 解包：
 
 ```bash
-npx --yes @electron/asar extract \\
-  /usr/lib/chatgpt/resources/app.asar \\
+npx --yes @electron/asar extract \
+  /usr/lib/chatgpt/resources/app.asar \
   ./app-asar
 ```
 
 定位当前 bundle：
 
-```find ./app-asar -type f -name 'app-primary-*.js' -print```
+```bash\nfind ./app-asar -type f -name 'app-primary-*.js' -print\n```
 
 搜索关键逻辑：
 
