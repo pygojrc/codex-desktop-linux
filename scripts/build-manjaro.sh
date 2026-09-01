@@ -61,11 +61,14 @@ info "Building ${PACKAGE_NAME}-${pkgver}-1-x86_64.pkg.zst"
   cd "$WORK_DIR/pkgbuild"
   CODEX_STAGE_DIR="$WORK_DIR/stage" \
     PKGDEST="$DIST_DIR" \
-    PKGEXT='.pkg.zst' \
+    PKGEXT='.pkg.tar.zst' \
     makepkg --nodeps --skipinteg --force
 )
 
 package_path="$DIST_DIR/${PACKAGE_NAME}-${pkgver}-1-x86_64.pkg.zst"
+makepkg_path="$DIST_DIR/${PACKAGE_NAME}-${pkgver}-1-x86_64.pkg.tar.zst"
+[[ -f "$makepkg_path" ]] || die "makepkg did not create the standard package: $makepkg_path"
+mv -- "$makepkg_path" "$package_path"
 [[ -f "$package_path" ]] || die "package was not created: $package_path"
 sha256sum "$package_path" > "$package_path.sha256"
 cat > "$DIST_DIR/release-metadata.json" <<EOF
