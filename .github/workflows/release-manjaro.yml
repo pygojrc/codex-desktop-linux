@@ -32,7 +32,7 @@ jobs:
           RUNNER_UID="$(id -u)"
           RUNNER_GID="$(id -g)"
           docker run --rm \
-            -e RUNNER_UID -e RUNNER_GID \
+            -e RUNNER_UID="$RUNNER_UID" -e RUNNER_GID="$RUNNER_GID" \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
             "$ARCH_IMAGE" bash -euxo pipefail -c '
