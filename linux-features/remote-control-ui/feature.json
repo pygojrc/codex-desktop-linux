@@ -1,9 +1,0 @@
-{
-  "id": "remote-control-ui",
-  "title": "Remote Control UI",
-  "description": "Adds opt-in Linux visibility patches for remote control and related settings surfaces.",
-  "defaultEnabled": false,
-  "entrypoints": {
-    "patchDescriptors": "./patch.js"
-  }
-}

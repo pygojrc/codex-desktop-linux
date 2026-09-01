@@ -1,0 +1,106 @@
+name: Release Manjaro KDE x86_64 package
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-manjaro.yml
+      - PKGBUILD
+      - scripts/build-manjaro.sh
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-manjaro-x86_64
+  cancel-in-progress: false
+
+env:
+  ARCH_IMAGE: archlinux:base-devel
+
+jobs:
+  build:
+    if: github.repository == 'pygojrc/codex-desktop-linux'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build in Arch Linux
+        run: |
+          set -Eeuo pipefail
+          RUNNER_UID="$(id -u)"
+          RUNNER_GID="$(id -g)"
+          docker run --rm \
+            -e RUNNER_UID -e RUNNER_GID \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            "$ARCH_IMAGE" bash -euxo pipefail -c '
+              pacman -Syu --noconfirm --needed ca-certificates curl dpkg git
+              groupadd --gid "$RUNNER_GID" codex-build 2>/dev/null || true
+              useradd --uid "$RUNNER_UID" --gid "$RUNNER_GID" --create-home --shell /bin/bash codex-build 2>/dev/null || true
+              chown -R "$RUNNER_UID:$RUNNER_GID" /work
+              runuser -u codex-build -- env HOME=/home/codex-build ./scripts/build-manjaro.sh
+            '
+      - name: Verify package and publish inputs
+        id: metadata
+        run: |
+          set -Eeuo pipefail
+          package="$(jq -r .package dist/release-metadata.json)"
+          test -f "dist/$package"
+          sha256sum --check "dist/$package.sha256"
+          version="$(jq -r .upstreamVersion dist/release-metadata.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manjaro-kde-x86_64
+          path: |
+            dist/*.pkg.zst
+            dist/*.sha256
+            dist/release-metadata.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_VERSION: ${{ steps.metadata.outputs.version }}
+          PACKAGE_FILE: ${{ steps.metadata.outputs.package }}
+        run: |
+          set -Eeuo pipefail
+          release_tag="manjaro-kde-${UPSTREAM_VERSION}"
+          cat > release-notes.md <<EOF
+          基于 ChatGPT 官方 Linux `.deb` ${UPSTREAM_VERSION} 的 Manjaro KDE x86_64 软件包。
+
+          构建方式：直接下载官方 `chatgpt_amd64.deb`，仅使用 `dpkg-deb -x` 解包数据区，再用 Arch `makepkg` 重打包；不会执行 Debian 安装脚本，也不会添加 APT 源。
+
+          安装：
+          ```bash
+          sudo pacman -U ${PACKAGE_FILE}
+          ```
+
+          KDE/Fcitx5 五笔兼容：桌面入口已设置 `GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx`。
+          EOF
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$release_tag" \
+              "dist/$PACKAGE_FILE" \
+              "dist/$PACKAGE_FILE.sha256" \
+              dist/release-metadata.json \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+            gh release edit "$release_tag" \
+              --title "Manjaro KDE x86_64 ${UPSTREAM_VERSION}" \
+              --notes-file release-notes.md \
+              --latest \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$release_tag" \
+              "dist/$PACKAGE_FILE" \
+              "dist/$PACKAGE_FILE.sha256" \
+              dist/release-metadata.json \
+              --target "$GITHUB_SHA" \
+              --title "Manjaro KDE x86_64 ${UPSTREAM_VERSION}" \
+              --notes-file release-notes.md \
+              --latest \
+              --repo "$GITHUB_REPOSITORY"
+          fi
