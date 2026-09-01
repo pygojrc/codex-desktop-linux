@@ -48,7 +48,7 @@ jobs:
           set -Eeuo pipefail
           package="$(jq -r .package dist/release-metadata.json)"
           test -f "dist/$package"
-          sha256sum --check "dist/$package.sha256"
+          (cd dist && sha256sum --check "$package.sha256")
           version="$(jq -r .upstreamVersion dist/release-metadata.json)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "package=$package" >> "$GITHUB_OUTPUT"
