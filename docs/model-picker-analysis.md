@@ -315,3 +315,131 @@ rg -o -F 'supportedReasoningEfforts' ./app-asar/webview/assets
 - Luna 是否进入模型查询和模型选择器由 `x=vc(ur,b.hostId)` 控制；
 - 要把 Luna 稳定加入快速滑动列表，最佳路径是复用/验证现有 Luna 分支，再处理 `supportedReasoningEfforts` 和 `hur` 的至少 3 档校验；
 - 当前项目只负责打包，实际修改必须在构建阶段 patch 官方 `app.asar`，不能恢复旧第三方仓库代码。
+
+
+## 九、针对“快速滑动列表最前面加入 Luna”的评估
+
+### 结论
+
+可以实现。推荐目标是：
+
+```
+Luna: low -> medium -> high -> ...
+原有快速档位: Terra/Sol/...
+```
+
+这里的“最前面”指 `powerSelections` 数组的前部，也就是滑动控件的前几个档位；它不是把 Luna 加到详细模型菜单的第一行。
+
+### 推荐修改点：动态前置 `gpt-5.6-luna`
+
+不要只修改静态 `wur`。推荐修改 `hur(e, options)`：
+
+1. 先执行当前版本原有的 preset/static/fallback 逻辑；
+2. 从传入的实际模型列表 `e` 中找到 `model === "gpt-5.6-luna"`；
+3. 使用 Luna 模型对象真实的 `supportedReasoningEfforts` 生成候选；
+4. 去掉结果中已有的 Luna 项，避免重复；
+5. 将 Luna 候选拼到结果最前面；
+6. 重新按最终数组顺序生成 `powerSettingIndex`；
+7. 最终结果仍必须满足当前 UI 的至少 3 个有效档位门槛。
+
+伪代码：
+
+```js
+function prependLuna(powerSelections, models) {
+  const luna = vur(models)
+    .filter(item => item.model === "gpt-5.6-luna");
+
+  if (luna.length === 0) {
+    return powerSelections;
+  }
+
+  const rest = powerSelections.filter(
+    item => item.model !== "gpt-5.6-luna"
+  );
+
+  return [...luna, ...rest].map((item, index) => ({
+    ...item,
+    powerSettingIndex: index
+  }));
+}
+```
+
+然后将 `hur` 中的三条返回路径都改成先调用 `prependLuna`：
+
+```js
+const result = prependLuna(originalResult, e);
+return result.length >= 3 ? result : [];
+```
+
+三条路径分别是：
+
+- `sliderModelsConfig.presets` 命中时；
+- 内置 `wur/Tur` 命中时；
+- `Eur` fallback 命中时。
+
+这样 Luna 会在远程 preset、Sol/Terra 静态候选和 fallback 三种情况下都能前置。
+
+### 为什么不能只修改 `wur`
+
+直接把以下对象插入 `wur`：
+
+```js
+{
+  id: "gpt-5.6-luna:medium",
+  model: "gpt-5.6-luna",
+  modelLabel: "5.6 Luna",
+  reasoningEffort: "medium"
+}
+```
+
+存在三个问题：
+
+- `xur` 会把不在实际模型列表中的 Luna 项过滤掉；
+- 只写一个 `medium` 档位可能不足以形成有效的快速滑动列表；
+- `sliderModelsConfig.presets` 存在时，`wur` 可能根本不会被使用。
+
+因此应以前置“实际可用 Luna 候选”为主，静态 `wur` 只作为 fallback 参考。
+
+### 是否需要修改 `$Or` 中的 Luna 条件
+
+当前 `$Or` 已有：
+
+```js
+let x = vc(ur, b.hostId)
+let W = x ? ["gpt-5.6-luna"] : []
+let G = new Set([...U, ...W, H])
+```
+
+如果当前用户的 Luna 模型已经出现在传给 `hur` 的 `e` 中，只修改 `hur` 即可把它前置。
+
+如果 `e` 中没有 Luna，则需要评估是否把：
+
+```js
+let W = x ? ["gpt-5.6-luna"] : []
+```
+
+改为始终把 `gpt-5.6-luna` 加入 `additionalAvailableModels`。这只会请求服务端返回该模型，不应伪造模型对象；最终仍应以服务端实际返回和客户端可用性过滤结果为准。
+
+在已有 Luna 权限的账号上，建议先测试原有 `x` 条件。如果原有分支已经返回 Luna，优先只 patch `hur`，改动更小。
+
+### 必须保留的约束
+
+- 不硬编码 Luna 的 reasoning effort；使用模型对象的 `supportedReasoningEfforts`；
+- 不硬编码绕过 `disabledReason`、账号权限或服务端模型列表；
+- 前置后重新计算 `powerSettingIndex`，避免滑块索引与显示顺序错位；
+- 保证至少 3 个有效档位，否则当前 `Ifr` 逻辑会切换到 advanced 视图；
+- 发送时仍使用真实的 `gpt-5.6-luna` 模型 ID；
+- 每个官方版本更新后重新检查 bundle marker 和函数结构。
+
+### 验证标准
+
+构建 patch 后至少验证：
+
+1. `rg` 能在当前 bundle 中找到 Luna 前置逻辑；
+2. 已授权账号打开快速滑动控件时，第一组档位是 Luna；
+3. Luna 的 low/medium/high 等档位数量与服务端返回一致；
+4. 选择 Luna 后发送请求的 model 字段确实是 `gpt-5.6-luna`；
+5. 无 Luna 权限时不显示伪造选项、不影响原有 Sol/Terra；
+6. 滑动控件、详细模型菜单、Wubi/Fcitx 输入均正常。
+
+本节只记录实现评估，尚未修改 bundle、构建脚本或发布新包。
