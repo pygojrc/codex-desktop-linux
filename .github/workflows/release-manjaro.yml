@@ -7,7 +7,6 @@ on:
       - .github/workflows/release-manjaro.yml
       - PKGBUILD
       - scripts/build-manjaro.sh
-      - scripts/patch-quick-model-picker.js
   workflow_dispatch:
 
 permissions:
@@ -37,7 +36,7 @@ jobs:
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
             "$ARCH_IMAGE" bash -euxo pipefail -c '
-              pacman -Syu --noconfirm --needed ca-certificates curl dpkg git nodejs npm
+              pacman -Syu --noconfirm --needed ca-certificates curl dpkg git
               groupadd --gid "$RUNNER_GID" codex-build 2>/dev/null || true
               useradd --uid "$RUNNER_UID" --gid "$RUNNER_GID" --create-home --shell /bin/bash codex-build 2>/dev/null || true
               chown -R "$RUNNER_UID:$RUNNER_GID" /work
@@ -71,16 +70,16 @@ jobs:
           set -Eeuo pipefail
           release_tag="manjaro-kde-${UPSTREAM_VERSION}"
           cat > release-notes.md <<EOF
-          基于 ChatGPT 官方 Linux `.deb` ${UPSTREAM_VERSION} 的 Manjaro KDE x86_64 软件包。
+          基于最新 ChatGPT 官方 Linux `.deb` ${UPSTREAM_VERSION} 的 Manjaro KDE x86_64 软件包。
 
-          构建方式：直接下载官方 `chatgpt_amd64.deb`，仅使用 `dpkg-deb -x` 解包数据区，再用 Arch `makepkg` 重打包；不会执行 Debian 安装脚本，也不会添加 APT 源。
+          构建方式：直接下载官方 `chatgpt_amd64.deb`，仅使用 `dpkg-deb -x` 解包数据区，再用 Arch `makepkg` 重打包；不会执行 Debian 安装脚本，也不会修改应用内部模型选择逻辑。
 
           安装：
           ```bash
           sudo pacman -U ${PACKAGE_FILE}
           ```
 
-          KDE/Fcitx5 五笔兼容：桌面入口已设置 `GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx`。
+          KDE/Fcitx5 五笔兼容：`/usr/bin/chatgpt` 包装脚本固定设置 `GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx`。
           EOF
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$release_tag" \
