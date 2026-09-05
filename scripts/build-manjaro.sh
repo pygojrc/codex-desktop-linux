@@ -15,15 +15,13 @@ info() { printf '==> %s\n' "$*" >&2; }
 command -v curl >/dev/null || die 'curl is required'
 command -v dpkg-deb >/dev/null || die 'dpkg-deb is required'
 command -v makepkg >/dev/null || die 'makepkg is required'
-command -v node >/dev/null || die 'node is required'
-command -v npx >/dev/null || die 'npx is required'
 
 mkdir -p "$DIST_DIR" "$WORK_DIR"
 rm -rf "$WORK_DIR/stage" "$WORK_DIR/pkgbuild"
 mkdir -p "$WORK_DIR/stage" "$WORK_DIR/pkgbuild"
 
 deb_path="$WORK_DIR/chatgpt_amd64.deb"
-info "Downloading official ChatGPT Linux package"
+info "Downloading latest official ChatGPT Linux package"
 curl --fail --location --retry 3 --retry-all-errors --output "$deb_path" "$UPSTREAM_URL"
 
 package_name="$(dpkg-deb -f "$deb_path" Package)"
@@ -33,31 +31,15 @@ upstream_arch="$(dpkg-deb -f "$deb_path" Architecture)"
 [[ "$upstream_arch" == amd64 ]] || die "unexpected upstream architecture: $upstream_arch"
 [[ "$upstream_version" =~ ^[0-9][0-9A-Za-z.+:~-]*$ ]] || die "invalid upstream version: $upstream_version"
 
-# Arch pkgver does not accept Debian's epoch separator or hyphen.
 pkgver="${upstream_version//:/_}"
 pkgver="${pkgver//-/_}"
 [[ "$pkgver" =~ ^[0-9][0-9A-Za-z.+_]*$ ]] || die "version cannot be represented as an Arch pkgver: $upstream_version"
 
-# dpkg-deb -x extracts only the data archive. Debian postinst/prerm scripts
-# are intentionally excluded, so the package cannot install an APT source.
+# Extract only the Debian data archive. Maintainer scripts are intentionally not run.
 info "Extracting data archive with dpkg-deb"
 dpkg-deb -x "$deb_path" "$WORK_DIR/stage"
 
-# Patch the official webview bundle before repackaging.
-asar_dir="$WORK_DIR/app-asar"
-patched_asar="$WORK_DIR/app.asar.patched"
-mkdir -p "$asar_dir"
-info "Patching quick slider default: gpt-5.6-luna:medium first"
-npx --yes @electron/asar@4.3.0 extract \
-  "$WORK_DIR/stage/usr/lib/chatgpt/resources/app.asar" \
-  "$asar_dir"
-node "$REPO_DIR/scripts/patch-quick-model-picker.js" \
-  "$asar_dir/webview/assets"
-npx --yes @electron/asar@4.3.0 pack "$asar_dir" "$patched_asar"
-mv -- "$patched_asar" "$WORK_DIR/stage/usr/lib/chatgpt/resources/app.asar"
-
-# Keep /usr/bin/chatgpt as a real wrapper rather than the upstream symlink.
-# This makes both KDE launches and direct command-line launches use Fcitx5.
+# Keep /usr/bin/chatgpt as a real wrapper so KDE and CLI launches use Fcitx5/Wubi.
 chatgpt_wrapper="$WORK_DIR/stage/usr/bin/chatgpt"
 [[ -e "$chatgpt_wrapper" || -L "$chatgpt_wrapper" ]] || die "upstream chatgpt launcher is missing"
 rm -f "$chatgpt_wrapper"
@@ -108,8 +90,7 @@ cat > "$DIST_DIR/release-metadata.json" <<EOF
   "upstreamVersion": "$upstream_version",
   "upstreamUrl": "$UPSTREAM_URL",
   "architecture": "x86_64",
-  "inputMethod": "GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx",
-  "quickSliderPatch": "gpt-5.6-luna:medium-first"
+  "inputMethod": "GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx"
 }
 EOF
 info "Built: $package_path"
