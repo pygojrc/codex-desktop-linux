@@ -1,13 +1,15 @@
 name: Release Manjaro KDE x86_64 package
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/release-manjaro.yml
-      - PKGBUILD
-      - scripts/build-manjaro.sh
+  schedule:
+    - cron: '17 */6 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Build and republish even if this upstream version already exists'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -18,10 +20,54 @@ concurrency:
 
 env:
   ARCH_IMAGE: archlinux:base-devel
+  UPSTREAM_URL: https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb
 
 jobs:
-  build:
+  check:
     if: github.repository == 'pygojrc/codex-desktop-linux'
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Check latest official .deb version
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_BUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+        run: |
+          set -Eeuo pipefail
+          deb_path="$(mktemp --suffix=.deb)"
+          trap 'rm -f "$deb_path"' EXIT
+
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output "$deb_path" "$UPSTREAM_URL"
+
+          package_name="$(dpkg-deb -f "$deb_path" Package)"
+          version="$(dpkg-deb -f "$deb_path" Version)"
+          arch="$(dpkg-deb -f "$deb_path" Architecture)"
+
+          test "$package_name" = chatgpt
+          test "$arch" = amd64
+          test -n "$version"
+
+          release_tag="manjaro-kde-${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [[ "$FORCE_BUILD" == true ]]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Force build requested for upstream version $version"
+          elif gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream version $version is already published as $release_tag; nothing to do."
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream version detected: $version"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -33,6 +79,7 @@ jobs:
           RUNNER_GID="$(id -g)"
           docker run --rm \
             -e RUNNER_UID="$RUNNER_UID" -e RUNNER_GID="$RUNNER_GID" \
+            -e CHATGPT_DEB_URL="$UPSTREAM_URL" \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
             "$ARCH_IMAGE" bash -euxo pipefail -c '
@@ -40,16 +87,19 @@ jobs:
               groupadd --gid "$RUNNER_GID" codex-build 2>/dev/null || true
               useradd --uid "$RUNNER_UID" --gid "$RUNNER_GID" --create-home --shell /bin/bash codex-build 2>/dev/null || true
               chown -R "$RUNNER_UID:$RUNNER_GID" /work
-              runuser -u codex-build -- env HOME=/home/codex-build ./scripts/build-manjaro.sh
+              runuser -u codex-build -- env HOME=/home/codex-build CHATGPT_DEB_URL="$CHATGPT_DEB_URL" ./scripts/build-manjaro.sh
             '
       - name: Verify package and publish inputs
         id: metadata
+        env:
+          EXPECTED_VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -Eeuo pipefail
           package="$(jq -r .package dist/release-metadata.json)"
           test -f "dist/$package"
           (cd dist && sha256sum --check "$package.sha256")
           version="$(jq -r .upstreamVersion dist/release-metadata.json)"
+          test "$version" = "$EXPECTED_VERSION"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "package=$package" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
