@@ -1,20 +1,25 @@
 # ChatGPT Desktop for Manjaro KDE
 
 This repository contains only the packaging layer for a Manjaro KDE x86_64
-package. It downloads the official OpenAI Linux `chatgpt_amd64.deb`, extracts
-its data archive with `dpkg-deb -x`, and repackages that unchanged runtime as a
-pacman package.
+package. It downloads the latest official OpenAI Linux `chatgpt_amd64.deb`,
+extracts its data archive with `dpkg-deb -x`, and repackages the upstream
+runtime as a pacman package.
 
-No third-party application source, patches, or updater is used. Debian
-maintainer scripts are not executed, so installing this package does not add an
-APT repository.
+No third-party application source, application-internal patches, or updater is
+used. Debian maintainer scripts are not executed, so installing this package
+does not add an APT repository.
+
+The only runtime compatibility change is the launcher environment needed for
+KDE/Fcitx5 Wubi input: `/usr/bin/chatgpt` is replaced with a small wrapper that
+sets `GTK_IM_MODULE=fcitx` and `XMODIFIERS=@im=fcitx`, then starts the official
+`/usr/lib/chatgpt/codex-launcher`.
 
 ## Build locally
 
 On Manjaro/Arch:
 
 ```bash
-sudo pacman -S --needed base-devel ca-certificates curl dpkg nodejs npm
+sudo pacman -S --needed base-devel ca-certificates curl dpkg
 ./scripts/build-manjaro.sh
 sudo pacman -U dist/codex-desktop-*.pkg.zst
 ```
@@ -30,15 +35,8 @@ SHA-256 checksum, and installs it with `pacman`:
 curl -fsSL https://raw.githubusercontent.com/pygojrc/codex-desktop-linux/main/install.sh | sh
 ```
 
-`/usr/bin/chatgpt` is a real wrapper script. It always sets
-`GTK_IM_MODULE=fcitx` and `XMODIFIERS=@im=fcitx` before executing the official
-runtime, so both KDE application-menu launches and direct command-line launches
-use the same Fcitx5 environment. Install `fcitx5` and `fcitx5-rime` separately
-when needed.
-
-The quick Power slider is patched at build time so `gpt-5.6-luna:medium` is the
-first quick-slider option when the package is built. The patch keeps the
-upstream model list and server-side permission checks.
+Install `fcitx5` and `fcitx5-rime` separately when Wubi/Rime input support is
+needed.
 
 ## Releases
 
