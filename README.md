@@ -1,7 +1,7 @@
 # ChatGPT Desktop for Manjaro KDE
 
 This repository contains only the packaging layer for a Manjaro KDE x86_64
-package. It downloads the latest official OpenAI Linux `chatgpt_amd64.deb`,
+package. It downloads the official OpenAI Linux `chatgpt_amd64.deb`,
 extracts its data archive with `dpkg-deb -x`, and repackages the upstream
 runtime as a pacman package.
 
@@ -24,9 +24,11 @@ sudo pacman -S --needed base-devel ca-certificates curl dpkg
 sudo pacman -U dist/codex-desktop-*.pkg.zst
 ```
 
-The output is x86_64-only and uses the exact version reported by the current
+The output is x86_64-only and uses the exact version reported by the downloaded
 official `.deb`. Override `CHATGPT_DEB_URL` only when deliberately testing a
-different official package.
+different official package. CI also passes the SHA-256 and expected upstream
+version from OpenAI's APT package index so the downloaded input is verified
+before packaging.
 
 The one-command installer downloads the latest Release asset, checks its
 SHA-256 checksum, and installs it with `pacman`:
@@ -40,8 +42,12 @@ needed.
 
 ## Releases
 
-GitHub Actions builds only Manjaro KDE x86_64 and publishes one `.pkg.zst`
-package, its SHA-256 file, and build metadata for each upstream version.
+GitHub Actions checks OpenAI's official APT `Packages` index every 30 minutes.
+The check only downloads the small package index. When a new upstream version
+does not already have a matching GitHub Release, the workflow downloads the
+versioned `.deb` from the index, verifies its SHA-256, builds the Manjaro KDE
+x86_64 package, and publishes one `.pkg.zst`, its SHA-256 file, and build
+metadata.
 
 The upstream ChatGPT application and its trademarks remain the property of
 OpenAI. This repository provides packaging scripts only.
