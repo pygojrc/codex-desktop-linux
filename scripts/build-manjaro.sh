@@ -6,6 +6,8 @@ REPO_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="${DIST_DIR:-$REPO_DIR/dist}"
 WORK_DIR="${WORK_DIR:-$DIST_DIR/work}"
 UPSTREAM_URL="${CHATGPT_DEB_URL:-https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb}"
+EXPECTED_UPSTREAM_SHA256="${CHATGPT_DEB_SHA256:-}"
+EXPECTED_UPSTREAM_VERSION="${EXPECTED_UPSTREAM_VERSION:-}"
 PACKAGE_NAME='codex-desktop'
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -15,14 +17,20 @@ info() { printf '==> %s\n' "$*" >&2; }
 command -v curl >/dev/null || die 'curl is required'
 command -v dpkg-deb >/dev/null || die 'dpkg-deb is required'
 command -v makepkg >/dev/null || die 'makepkg is required'
+command -v sha256sum >/dev/null || die 'sha256sum is required'
 
 mkdir -p "$DIST_DIR" "$WORK_DIR"
 rm -rf "$WORK_DIR/stage" "$WORK_DIR/pkgbuild"
 mkdir -p "$WORK_DIR/stage" "$WORK_DIR/pkgbuild"
 
 deb_path="$WORK_DIR/chatgpt_amd64.deb"
-info "Downloading latest official ChatGPT Linux package"
+info "Downloading official ChatGPT Linux package"
 curl --fail --location --retry 3 --retry-all-errors --output "$deb_path" "$UPSTREAM_URL"
+
+actual_upstream_sha256="$(sha256sum "$deb_path" | awk '{print $1}')"
+if [[ -n "$EXPECTED_UPSTREAM_SHA256" ]]; then
+  [[ "$actual_upstream_sha256" == "$EXPECTED_UPSTREAM_SHA256" ]]     || die "upstream SHA-256 mismatch: expected $EXPECTED_UPSTREAM_SHA256, got $actual_upstream_sha256"
+fi
 
 package_name="$(dpkg-deb -f "$deb_path" Package)"
 upstream_version="$(dpkg-deb -f "$deb_path" Version)"
@@ -30,6 +38,9 @@ upstream_arch="$(dpkg-deb -f "$deb_path" Architecture)"
 [[ "$package_name" == chatgpt ]] || die "unexpected upstream package: $package_name"
 [[ "$upstream_arch" == amd64 ]] || die "unexpected upstream architecture: $upstream_arch"
 [[ "$upstream_version" =~ ^[0-9][0-9A-Za-z.+:~-]*$ ]] || die "invalid upstream version: $upstream_version"
+if [[ -n "$EXPECTED_UPSTREAM_VERSION" ]]; then
+  [[ "$upstream_version" == "$EXPECTED_UPSTREAM_VERSION" ]]     || die "upstream version mismatch: expected $EXPECTED_UPSTREAM_VERSION, got $upstream_version"
+fi
 
 pkgver="${upstream_version//:/_}"
 pkgver="${pkgver//-/_}"
@@ -54,11 +65,8 @@ chmod 0755 "$chatgpt_wrapper"
 
 desktop_file="$WORK_DIR/stage/usr/share/applications/chatgpt.desktop"
 [[ -f "$desktop_file" ]] || die "upstream desktop entry is missing"
-sed -i \
-  's|^Exec=env GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx chatgpt %U$|Exec=chatgpt %U|' \
-  "$desktop_file"
-grep -Fqx 'Exec=chatgpt %U' "$desktop_file" \
-  || die 'unexpected ChatGPT desktop entry'
+sed -i   's|^Exec=env GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx chatgpt %U$|Exec=chatgpt %U|'   "$desktop_file"
+grep -Fqx 'Exec=chatgpt %U' "$desktop_file"   || die 'unexpected ChatGPT desktop entry'
 
 cat > "$WORK_DIR/pkgbuild/PKGBUILD" <<EOF
 $(sed "s/^pkgver=.*/pkgver=$pkgver/" "$REPO_DIR/PKGBUILD")
@@ -67,10 +75,7 @@ EOF
 info "Building ${PACKAGE_NAME}-${pkgver}-1-x86_64.pkg.zst"
 (
   cd "$WORK_DIR/pkgbuild"
-  CODEX_STAGE_DIR="$WORK_DIR/stage" \
-    PKGDEST="$DIST_DIR" \
-    PKGEXT='.pkg.tar.zst' \
-    makepkg --nodeps --skipinteg --force
+  CODEX_STAGE_DIR="$WORK_DIR/stage"     PKGDEST="$DIST_DIR"     PKGEXT='.pkg.tar.zst'     makepkg --nodeps --skipinteg --force
 )
 
 package_path="$DIST_DIR/${PACKAGE_NAME}-${pkgver}-1-x86_64.pkg.zst"
@@ -89,6 +94,7 @@ cat > "$DIST_DIR/release-metadata.json" <<EOF
   "upstreamPackage": "chatgpt",
   "upstreamVersion": "$upstream_version",
   "upstreamUrl": "$UPSTREAM_URL",
+  "upstreamSha256": "$actual_upstream_sha256",
   "architecture": "x86_64",
   "inputMethod": "GTK_IM_MODULE=fcitx XMODIFIERS=@im=fcitx"
 }
