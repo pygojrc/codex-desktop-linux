@@ -55,7 +55,8 @@ OpenAI. This repository provides packaging scripts only.
 
 ## Historical 26.928.40906 Model Picker Presets build
 
-The independent `release-mpp.yml` workflow is manual-only. It uses the pinned
+The independent `release-mpp.yml` workflow supports manual dispatch and push
+events on two dedicated branches. It uses the pinned
 `manjaro-kde-26.928.40906` Release asset and the ilysenko Git submodule at
 `a0b23fed42be7f03d5a23f017efb111b1346a559`. Only
 `model-picker-default-presets` is enabled. The five feature descriptors patch
@@ -82,7 +83,8 @@ MPP_SOURCE_PACKAGE=/path/to/codex-desktop-26.928.40906-1-x86_64.pkg.zst \
 The build checks the pinned source SHA-256, ASAR layout, each descriptor,
 the changed asset set, package metadata, Fcitx5 wrapper, bundled CLI and
 code-mode host. `dist/` contains the standard `.pkg.tar.zst`, checksum,
-patch report and provenance metadata. Run the workflow with `publish=false`
-to inspect an Actions Artifact; `publish=true` creates an independent
-prerelease tag. Desktop login, Quick Chat and model picker behavior still
-require testing in Manjaro KDE.
+patch report and provenance metadata. Push to `ci/mpp-26.928.40906` for a
+build-only Artifact, or push to `release/mpp-26.928.40906` to build, verify,
+and create an independent prerelease tag. Manual dispatch still accepts
+`publish=false` or `publish=true`. Desktop login, Quick Chat and model picker
+behavior still require testing in Manjaro KDE.
