@@ -1,6 +1,10 @@
 name: Build 26.928.40906 Model Picker Presets
 
 on:
+  push:
+    branches:
+      - ci/mpp-26.928.40906
+      - release/mpp-26.928.40906
   workflow_dispatch:
     inputs:
       publish:
@@ -86,7 +90,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Publish independent prerelease
-        if: inputs.publish
+        if: inputs.publish || github.ref == 'refs/heads/release/mpp-26.928.40906'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
