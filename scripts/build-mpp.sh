@@ -9,7 +9,7 @@ dist="${DIST_DIR:-$repo_dir/dist}"
 work="$dist/work-mpp"
 source_sha='18cf3d38cc6c50ba41425890404888089019e3fecf43e06c0fedabe63165b7a7'
 version='26.928.40906'
-pkgrel=2
+pkgrel=3
 
 die() { echo "error: $*" >&2; exit 1; }
 [[ "$(uname -m)" == x86_64 ]] || die 'x86_64 host required'
