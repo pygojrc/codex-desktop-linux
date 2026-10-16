@@ -39,7 +39,26 @@ jobs:
           set -Eeuo pipefail
           test "$(git -C upstream/ilysenko rev-parse HEAD)" = a0b23fed42be7f03d5a23f017efb111b1346a559
           test "$(git ls-tree HEAD upstream/ilysenko | awk '{print $3}')" = a0b23fed42be7f03d5a23f017efb111b1346a559
+      - name: Check existing MPP release
+        id: release_status
+        if: inputs.publish || github.ref == 'refs/heads/release/mpp-26.928.40906'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "refs/tags/$RELEASE_TAG"
+            if ! git diff --quiet FETCH_HEAD HEAD -- \
+              .gitmodules upstream/ilysenko PKGBUILD configs/mpp/features.json \
+              scripts/build-mpp.sh scripts/patch-mpp.js scripts/verify-mpp.js; then
+              echo "Release $RELEASE_TAG exists with different package inputs; use a new tag" >&2
+              exit 1
+            fi
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $RELEASE_TAG already contains this build; skipping duplicate build"
+          fi
       - name: Download and verify historical Release asset
+        if: steps.release_status.outputs.exists != 'true'
         run: |
           set -Eeuo pipefail
           mkdir -p input
@@ -48,6 +67,7 @@ jobs:
             "https://github.com/pygojrc/codex-desktop-linux/releases/download/manjaro-kde-26.928.40906/$SOURCE_ASSET"
           echo "$SOURCE_SHA256  input/$SOURCE_ASSET" | sha256sum --check -
       - name: Patch and build in Arch Linux
+        if: steps.release_status.outputs.exists != 'true'
         run: |
           set -Eeuo pipefail
           runner_uid="$(id -u)"
@@ -71,6 +91,7 @@ jobs:
                 '\''
             '
       - name: Verify artifact metadata
+        if: steps.release_status.outputs.exists != 'true'
         run: |
           set -Eeuo pipefail
           (cd dist && sha256sum --check "$PACKAGE.sha256")
@@ -80,6 +101,7 @@ jobs:
           test "$(jq -r '.patchStatuses | length' dist/mpp-release-metadata.json)" = 5
           test "$(jq -r '[.patchStatuses[] | select(.status != "applied")] | length' dist/mpp-release-metadata.json)" = 0
       - uses: actions/upload-artifact@v4
+        if: steps.release_status.outputs.exists != 'true'
         with:
           name: manjaro-kde-26.928.40906-mpp-x86_64
           path: |
@@ -90,15 +112,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Publish independent prerelease
-        if: inputs.publish || github.ref == 'refs/heads/release/mpp-26.928.40906'
+        if: (inputs.publish || github.ref == 'refs/heads/release/mpp-26.928.40906') && steps.release_status.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists; refusing to overwrite it" >&2
-            exit 1
-          fi
           cat > dist/mpp-release-notes.md <<EOF
           ChatGPT Desktop 26.928.40906 with the Model Picker Default Presets feature.
 
