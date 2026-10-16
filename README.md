@@ -5,9 +5,10 @@ package. It downloads the official OpenAI Linux `chatgpt_amd64.deb`,
 extracts its data archive with `dpkg-deb -x`, and repackages the upstream
 runtime as a pacman package.
 
-No third-party application source, application-internal patches, or updater is
-used. Debian maintainer scripts are not executed, so installing this package
-does not add an APT repository.
+The standard release track uses no third-party application source,
+application-internal patches, or updater. Debian maintainer scripts are not
+executed, so installing this package does not add an APT repository. A separate
+historical Model Picker Presets build is described below.
 
 The only runtime compatibility change is the launcher environment needed for
 KDE/Fcitx5 Wubi input: `/usr/bin/chatgpt` is replaced with a small wrapper that
@@ -51,3 +52,37 @@ metadata.
 
 The upstream ChatGPT application and its trademarks remain the property of
 OpenAI. This repository provides packaging scripts only.
+
+## Historical 26.928.40906 Model Picker Presets build
+
+The independent `release-mpp.yml` workflow is manual-only. It uses the pinned
+`manjaro-kde-26.928.40906` Release asset and the ilysenko Git submodule at
+`a0b23fed42be7f03d5a23f017efb111b1346a559`. Only
+`model-picker-default-presets` is enabled. The five feature descriptors patch
+three ASAR webview assets; the script rejects missing or unexpected changes.
+The ordinary scheduled release and installer remain on the original track.
+
+Edit `configs/mpp/features.json` before building to choose ordered model and
+effort pairs. Exactly one pair must have `"default": true`. These values are
+compiled into the ASAR; changing them requires a rebuild and a new release
+suffix. The sample pairs do not grant model access and may be filtered by the
+account catalog or workspace policy.
+
+To build locally on Arch/Manjaro, initialize the submodule, provide the
+historical asset, install the pinned ASAR CLI, and run:
+
+```bash
+git submodule update --init --recursive
+npm install --prefix .mpp-tooling --no-save @electron/asar@4.3.1
+MPP_SOURCE_PACKAGE=/path/to/codex-desktop-26.928.40906-1-x86_64.pkg.zst \
+  MPP_ASAR_BIN="$PWD/.mpp-tooling/node_modules/.bin/asar" \
+  ./scripts/build-mpp.sh
+```
+
+The build checks the pinned source SHA-256, ASAR layout, each descriptor,
+the changed asset set, package metadata, Fcitx5 wrapper, bundled CLI and
+code-mode host. `dist/` contains the standard `.pkg.tar.zst`, checksum,
+patch report and provenance metadata. Run the workflow with `publish=false`
+to inspect an Actions Artifact; `publish=true` creates an independent
+prerelease tag. Desktop login, Quick Chat and model picker behavior still
+require testing in Manjaro KDE.

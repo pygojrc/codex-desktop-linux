@@ -1,0 +1,113 @@
+name: Build 26.928.40906 Model Picker Presets
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the verified package as an independent prerelease'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-mpp-26.928.40906
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'pygojrc/codex-desktop-linux'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SOURCE_ASSET: codex-desktop-26.928.40906-1-x86_64.pkg.zst
+      SOURCE_SHA256: 18cf3d38cc6c50ba41425890404888089019e3fecf43e06c0fedabe63165b7a7
+      RELEASE_TAG: manjaro-kde-26.928.40906-mpp.1
+      PACKAGE: codex-desktop-26.928.40906-2-x86_64.pkg.tar.zst
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Verify pinned feature source
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C upstream/ilysenko rev-parse HEAD)" = a0b23fed42be7f03d5a23f017efb111b1346a559
+          test "$(git ls-tree HEAD upstream/ilysenko | awk '{print $3}')" = a0b23fed42be7f03d5a23f017efb111b1346a559
+      - name: Download and verify historical Release asset
+        run: |
+          set -Eeuo pipefail
+          mkdir -p input
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output "input/$SOURCE_ASSET" \
+            "https://github.com/pygojrc/codex-desktop-linux/releases/download/manjaro-kde-26.928.40906/$SOURCE_ASSET"
+          echo "$SOURCE_SHA256  input/$SOURCE_ASSET" | sha256sum --check -
+      - name: Patch and build in Arch Linux
+        run: |
+          set -Eeuo pipefail
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          docker run --rm \
+            -e RUNNER_UID="$runner_uid" -e RUNNER_GID="$runner_gid" \
+            -e SOURCE_ASSET="$SOURCE_ASSET" \
+            -v "$GITHUB_WORKSPACE:/work" -w /work \
+            archlinux:base-devel bash -euxo pipefail -c '
+              pacman -Syu --noconfirm --needed ca-certificates nodejs npm git
+              groupadd --gid "$RUNNER_GID" codex-build 2>/dev/null || true
+              useradd --uid "$RUNNER_UID" --gid "$RUNNER_GID" --create-home --shell /bin/bash codex-build 2>/dev/null || true
+              chown -R "$RUNNER_UID:$RUNNER_GID" /work
+              runuser -u codex-build -- env \
+                HOME=/home/codex-build \
+                SOURCE_ASSET="$SOURCE_ASSET" bash -euxo pipefail -c '\''
+                  npm install --prefix .mpp-tooling --no-save @electron/asar@4.3.1
+                  MPP_SOURCE_PACKAGE="/work/input/$SOURCE_ASSET" \
+                    MPP_ASAR_BIN=/work/.mpp-tooling/node_modules/.bin/asar \
+                    ./scripts/build-mpp.sh
+                '\''
+            '
+      - name: Verify artifact metadata
+        run: |
+          set -Eeuo pipefail
+          (cd dist && sha256sum --check "$PACKAGE.sha256")
+          test "$(jq -r .package dist/mpp-release-metadata.json)" = "$PACKAGE"
+          test "$(jq -r .sourcePackageSha256 dist/mpp-release-metadata.json)" = "$SOURCE_SHA256"
+          test "$(jq -r .featureSourceCommit dist/mpp-release-metadata.json)" = a0b23fed42be7f03d5a23f017efb111b1346a559
+          test "$(jq -r '.patchStatuses | length' dist/mpp-release-metadata.json)" = 5
+          test "$(jq -r '[.patchStatuses[] | select(.status != "applied")] | length' dist/mpp-release-metadata.json)" = 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manjaro-kde-26.928.40906-mpp-x86_64
+          path: |
+            dist/${{ env.PACKAGE }}
+            dist/${{ env.PACKAGE }}.sha256
+            dist/mpp-release-metadata.json
+            dist/mpp-patch-report.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish independent prerelease
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; refusing to overwrite it" >&2
+            exit 1
+          fi
+          cat > dist/mpp-release-notes.md <<EOF
+          ChatGPT Desktop 26.928.40906 with the Model Picker Default Presets feature.
+
+          Source: pygojrc's manjaro-kde-26.928.40906 package, SHA-256 $SOURCE_SHA256.
+          Feature source: ilysenko/codex-desktop-linux at a0b23fed42be7f03d5a23f017efb111b1346a559.
+          Only the five MPP patch descriptors were applied. The package retains the Fcitx5 launcher and bundled CLI.
+          Presets are fixed at build time; see configs/mpp/features.json in the source repository.
+
+          Install manually with: sudo pacman -U $PACKAGE
+          EOF
+          gh release create "$RELEASE_TAG" \
+            "dist/$PACKAGE" "dist/$PACKAGE.sha256" \
+            dist/mpp-release-metadata.json dist/mpp-patch-report.json \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title 'Manjaro KDE 26.928.40906 + Model Picker Presets' \
+            --notes-file dist/mpp-release-notes.md --prerelease --latest=false

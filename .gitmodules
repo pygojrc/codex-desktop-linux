@@ -1,0 +1,3 @@
+[submodule "upstream/ilysenko"]
+	path = upstream/ilysenko
+	url = https://github.com/ilysenko/codex-desktop-linux.git
