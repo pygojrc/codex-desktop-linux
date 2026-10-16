@@ -1,0 +1,7 @@
+{
+  "tag": "manjaro-kde-26.928.40906-mpp.1",
+  "sourceRelease": "manjaro-kde-26.928.40906",
+  "featureSourceCommit": "a0b23fed42be7f03d5a23f017efb111b1346a559",
+  "verifiedRun": "https://github.com/pygojrc/codex-desktop-linux/actions/runs/38886311589",
+  "verifiedArtifactDigest": "sha256:a8ff3d9b65ac7b6fbbf27e6755bb642fc77c2064067bd8bd6ff35ccb26e5c5b5"
+}
