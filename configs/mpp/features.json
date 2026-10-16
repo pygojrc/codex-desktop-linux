@@ -1,10 +1,51 @@
 {
-  "enabled": ["model-picker-default-presets"],
+  "enabled": [
+    "model-picker-default-presets"
+  ],
   "settings": {
     "model-picker-default-presets": {
       "presets": [
-        { "model": "gpt-6-astra", "effort": "medium", "default": true },
-        { "model": "gpt-5.6-sol", "effort": "high" }
+        {
+          "model": "gpt-6-luna",
+          "effort": "medium",
+          "default": true
+        },
+        {
+          "model": "gpt-6-luna",
+          "effort": "high"
+        },
+        {
+          "model": "gpt-6-sol",
+          "effort": "medium"
+        },
+        {
+          "model": "gpt-6-sol",
+          "effort": "high"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "medium"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        },
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "xhigh"
+        },
+        {
+          "model": "gpt-6-astra",
+          "effort": "medium"
+        },
+        {
+          "model": "gpt-6-astra",
+          "effort": "high"
+        },
+        {
+          "model": "gpt-6-astra",
+          "effort": "xhigh"
+        }
       ]
     }
   }

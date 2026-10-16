@@ -12,6 +12,11 @@ on:
         type: boolean
         required: true
         default: false
+      overwrite:
+        description: 'Replace assets in the existing MPP prerelease'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: write
@@ -29,7 +34,7 @@ jobs:
       SOURCE_ASSET: codex-desktop-26.928.40906-1-x86_64.pkg.zst
       SOURCE_SHA256: 18cf3d38cc6c50ba41425890404888089019e3fecf43e06c0fedabe63165b7a7
       RELEASE_TAG: manjaro-kde-26.928.40906-mpp.1
-      PACKAGE: codex-desktop-26.928.40906-2-x86_64.pkg.tar.zst
+      PACKAGE: codex-desktop-26.928.40906-3-x86_64.pkg.tar.zst
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,21 +49,34 @@ jobs:
         if: inputs.publish || github.ref == 'refs/heads/release/mpp-26.928.40906'
         env:
           GH_TOKEN: ${{ github.token }}
+          OVERWRITE: ${{ inputs.overwrite }}
+          IS_RELEASE_BRANCH: ${{ github.ref == 'refs/heads/release/mpp-26.928.40906' }}
         run: |
           set -Eeuo pipefail
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             git fetch --no-tags --depth=1 origin "refs/tags/$RELEASE_TAG"
+            same_inputs=true
             if ! git diff --quiet FETCH_HEAD HEAD -- \
               .gitmodules upstream/ilysenko PKGBUILD configs/mpp/features.json \
               scripts/build-mpp.sh scripts/patch-mpp.js scripts/verify-mpp.js; then
-              echo "Release $RELEASE_TAG exists with different package inputs; use a new tag" >&2
-              exit 1
+              same_inputs=false
             fi
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Release $RELEASE_TAG already contains this build; skipping duplicate build"
+            if [[ "$same_inputs" == true && "$OVERWRITE" != true ]]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Release $RELEASE_TAG already contains these package inputs; skipping duplicate build"
+            elif [[ "$same_inputs" == false && "$IS_RELEASE_BRANCH" != true && "$OVERWRITE" != true ]]; then
+              echo "Release $RELEASE_TAG exists with different package inputs; set overwrite=true or push the dedicated release branch" >&2
+              exit 1
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "replace=true" >> "$GITHUB_OUTPUT"
+              echo "Will replace assets in existing release $RELEASE_TAG"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Download and verify historical Release asset
-        if: steps.release_status.outputs.exists != 'true'
+        if: steps.release_status.outputs.skip != 'true'
         run: |
           set -Eeuo pipefail
           mkdir -p input
@@ -67,7 +85,7 @@ jobs:
             "https://github.com/pygojrc/codex-desktop-linux/releases/download/manjaro-kde-26.928.40906/$SOURCE_ASSET"
           echo "$SOURCE_SHA256  input/$SOURCE_ASSET" | sha256sum --check -
       - name: Patch and build in Arch Linux
-        if: steps.release_status.outputs.exists != 'true'
+        if: steps.release_status.outputs.skip != 'true'
         run: |
           set -Eeuo pipefail
           runner_uid="$(id -u)"
@@ -91,7 +109,7 @@ jobs:
                 '\''
             '
       - name: Verify artifact metadata
-        if: steps.release_status.outputs.exists != 'true'
+        if: steps.release_status.outputs.skip != 'true'
         run: |
           set -Eeuo pipefail
           (cd dist && sha256sum --check "$PACKAGE.sha256")
@@ -101,7 +119,7 @@ jobs:
           test "$(jq -r '.patchStatuses | length' dist/mpp-release-metadata.json)" = 5
           test "$(jq -r '[.patchStatuses[] | select(.status != "applied")] | length' dist/mpp-release-metadata.json)" = 0
       - uses: actions/upload-artifact@v4
-        if: steps.release_status.outputs.exists != 'true'
+        if: steps.release_status.outputs.skip != 'true'
         with:
           name: manjaro-kde-26.928.40906-mpp-x86_64
           path: |
@@ -112,7 +130,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Publish independent prerelease
-        if: (inputs.publish || github.ref == 'refs/heads/release/mpp-26.928.40906') && steps.release_status.outputs.exists != 'true'
+        if: (inputs.publish || inputs.overwrite || github.ref == 'refs/heads/release/mpp-26.928.40906') && steps.release_status.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -127,9 +145,25 @@ jobs:
 
           Install manually with: sudo pacman -U $PACKAGE
           EOF
-          gh release create "$RELEASE_TAG" \
-            "dist/$PACKAGE" "dist/$PACKAGE.sha256" \
-            dist/mpp-release-metadata.json dist/mpp-patch-report.json \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title 'Manjaro KDE 26.928.40906 + Model Picker Presets' \
-            --notes-file dist/mpp-release-notes.md --prerelease --latest=false
+          if [[ "${{ steps.release_status.outputs.replace }}" == true ]]; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title 'Manjaro KDE 26.928.40906 + Model Picker Presets' \
+              --notes-file dist/mpp-release-notes.md --prerelease --latest=false
+            gh release upload "$RELEASE_TAG" \
+              "dist/$PACKAGE" "dist/$PACKAGE.sha256" \
+              dist/mpp-release-metadata.json dist/mpp-patch-report.json \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release delete-asset "$RELEASE_TAG" \
+              codex-desktop-26.928.40906-2-x86_64.pkg.tar.zst \
+              --repo "$GITHUB_REPOSITORY" --yes || true
+            gh release delete-asset "$RELEASE_TAG" \
+              codex-desktop-26.928.40906-2-x86_64.pkg.tar.zst.sha256 \
+              --repo "$GITHUB_REPOSITORY" --yes || true
+          else
+            gh release create "$RELEASE_TAG" \
+              "dist/$PACKAGE" "dist/$PACKAGE.sha256" \
+              dist/mpp-release-metadata.json dist/mpp-patch-report.json \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title 'Manjaro KDE 26.928.40906 + Model Picker Presets' \
+              --notes-file dist/mpp-release-notes.md --prerelease --latest=false
+          fi
