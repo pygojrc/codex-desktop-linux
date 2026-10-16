@@ -73,8 +73,9 @@ sed -e "s/^pkgver=.*/pkgver=$version/" -e "s/^pkgrel=.*/pkgrel=$pkgrel/" \
 package="codex-desktop-$version-$pkgrel-x86_64.pkg.tar.zst"
 [[ -f "$dist/$package" ]] || die 'makepkg did not produce the expected package'
 tar -xOf "$dist/$package" usr/bin/chatgpt | cmp - "$work/stage/usr/bin/chatgpt"
-tar -tf "$dist/$package" | grep -Fqx 'usr/lib/chatgpt/resources/codex-code-mode-host'
-tar -tf "$dist/$package" | grep -Fqx 'usr/lib/chatgpt/resources/codex'
+tar -tf "$dist/$package" > "$work/package-files.txt"
+grep -Fqx 'usr/lib/chatgpt/resources/codex-code-mode-host' "$work/package-files.txt"
+grep -Fqx 'usr/lib/chatgpt/resources/codex' "$work/package-files.txt"
 (cd "$dist" && sha256sum "$package" > "$package.sha256")
 
 SOURCE_SHA="$source_sha" ORIGINAL_ASAR_SHA="$original_asar_sha" PATCHED_ASAR_SHA="$patched_asar_sha" \
